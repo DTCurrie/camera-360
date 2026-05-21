@@ -147,12 +147,17 @@ func (c *Capture) decodeStream(r io.Reader) error {
 	br := bufio.NewReader(r)
 	var frames int
 	for {
+		// Resync to the next FF D8. Even with a stable bufio across calls,
+		// jpeg.Decode can leave the reader positioned past EOI when an
+		// MJPEG-over-image2pipe encoder writes padding between frames — the
+		// next Decode then starts inside scan data and errors with
+		// "missing SOI marker". Discarding up to the next SOI is cheap and
+		// keeps us aligned regardless of what ffmpeg emits.
+		if err := scanToSOI(br); err != nil {
+			return err
+		}
 		img, err := jpeg.Decode(br)
 		if err != nil {
-			// Peek at whatever is at the front of the buffer so we can tell
-			// the difference between "ffmpeg wrote garbage" and "we ate the
-			// SOI bytes somewhere". A healthy MJPEG stream starts every frame
-			// with ff d8.
 			peek, _ := br.Peek(32)
 			c.logger.Warnw("jpeg decode failed",
 				"err", err, "frames_decoded", frames, "peek_hex", fmt.Sprintf("%x", peek))
@@ -161,6 +166,26 @@ func (c *Capture) decodeStream(r io.Reader) error {
 		frames++
 		c.latest.Store(&img)
 		c.gotFirstOnce.Do(func() { close(c.gotFirstFrame) })
+	}
+}
+
+// scanToSOI advances br until the next two buffered bytes are the JPEG SOI
+// marker (FF D8), then returns with those bytes still unread so jpeg.Decode
+// will see them. We use Peek+Discard rather than ReadByte so we never have
+// to un-read more than zero bytes (bufio.Reader can only UnreadByte the
+// single most recently read byte).
+func scanToSOI(br *bufio.Reader) error {
+	for {
+		head, err := br.Peek(2)
+		if err != nil {
+			return err
+		}
+		if head[0] == 0xFF && head[1] == 0xD8 {
+			return nil
+		}
+		if _, err := br.Discard(1); err != nil {
+			return err
+		}
 	}
 }
 

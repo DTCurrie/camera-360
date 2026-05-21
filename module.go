@@ -323,6 +323,11 @@ func (c *camera360Camera) Images(ctx context.Context, filterSourceNames []string
 		if err != nil {
 			return nil, resource.ResponseMetadata{}, err
 		}
+		namedImg, err := camera.NamedImageFromBytes(imagebytes, SourceEquirectangular, utils.MimeTypeJPEG, data.Annotations{})
+		if err != nil {
+			return nil, resource.ResponseMetadata{}, fmt.Errorf("failed to create named image: %w", err)
+		}
+		out = append(out, namedImg)
 	}
 	if want(SourceRaw) {
 		if err := add(raw, SourceRaw); err != nil {
