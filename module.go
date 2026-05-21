@@ -315,8 +315,11 @@ func (c *camera360Camera) Images(ctx context.Context, filterSourceNames []string
 		</rdf:RDF>
 		</x:xmpmeta>
 		`
-		imagebytes := erp.Pix[:]
-		imagebytes, err := addXMPToJPEG(imagebytes, xmp)
+		imagebytes, err := encodeJPEG(erp)
+		if err != nil {
+			return nil, resource.ResponseMetadata{}, fmt.Errorf("failed to encode equirectangular jpeg: %w", err)
+		}
+		imagebytes, err = addXMPToJPEG(imagebytes, xmp)
 		if err != nil {
 			return nil, resource.ResponseMetadata{}, err
 		}
