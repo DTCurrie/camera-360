@@ -1,0 +1,33 @@
+# systemd-networkd unit for hosts (Pi, Linux desktops) that connect to an
+# AKASO 360 over USB Ethernet.
+#
+# Installs the static host-side IP (10.42.0.2/24) on whichever interface
+# enumerates as the camera's USB Ethernet gadget. The gadget's MAC
+# regenerates on every boot of the camera, so we match by name pattern
+# rather than MAC. Linux names CDC/RNDIS gadget interfaces "usb0", "usb1",
+# etc. — if your distro renames them (e.g. predictable interface names
+# producing "enxAABBCCDDEEFF"), see the alternative Match block below.
+#
+# Install:
+#   sudo cp etc/10-akaso-camera.network /etc/systemd/network/
+#   sudo systemctl enable --now systemd-networkd
+#   sudo systemctl restart systemd-networkd
+#
+# After this, every plug/replug of the USB-C cable gives the camera a
+# stable, reachable static peer at 10.42.0.1.
+
+[Match]
+Name=usb0 usb*
+# Alternative if your distro uses predictable names for USB Ethernet:
+# Driver=cdc_ether rndis_host
+
+[Network]
+Address=10.42.0.2/24
+# We want the address bound the moment the interface appears, before the
+# camera-side announces link. Without this systemd-networkd waits for
+# carrier first and the module's first connection attempt races the link.
+ConfigureWithoutCarrier=yes
+
+# Do NOT add a default route via the camera — it has no internet. The
+# /24 implicit route is enough for module → camera traffic.
+DefaultRouteOnDevice=no
