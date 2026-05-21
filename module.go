@@ -305,6 +305,27 @@ func (c *camera360Camera) Images(ctx context.Context, filterSourceNames []string
 		out = append(out, ni)
 		return nil
 	}
+	if want(SourceEquirectangular) {
+		xmp := `
+		<x:xmpmeta xmlns:x="adobe:ns:meta/">
+		<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+		<rdf:Description xmlns:viam="https://www.viam.com/ns/1.0/">
+		<viam:is360>true</viam:is360>
+		</rdf:Description>
+		</rdf:RDF>
+		</x:xmpmeta>
+		`
+		imagebytes := erp.Pix[:]
+		imagebytes, err := addXMPToJPEG(imagebytes, xmp)
+		if err != nil {
+			return nil, resource.ResponseMetadata{}, err
+		}
+		namedImg, err := camera.NamedImageFromBytes(imagebytes, SourceEquirectangular, utils.MimeTypeJPEG, data.Annotations{})
+		if err != nil {
+			return nil, resource.ResponseMetadata{}, fmt.Errorf("failed to create named image: %w", err)
+		}
+		out = append(out, namedImg)
+	}
 	if want(SourceRaw) {
 		if err := add(raw, SourceRaw); err != nil {
 			return nil, resource.ResponseMetadata{}, err
@@ -317,11 +338,6 @@ func (c *camera360Camera) Images(ctx context.Context, filterSourceNames []string
 	}
 	if want(SourceBack) {
 		if err := add(c.stitcher.HalfFrame(raw, "back"), SourceBack); err != nil {
-			return nil, resource.ResponseMetadata{}, err
-		}
-	}
-	if want(SourceEquirectangular) {
-		if err := add(erp, SourceEquirectangular); err != nil {
 			return nil, resource.ResponseMetadata{}, err
 		}
 	}
@@ -562,4 +578,39 @@ func encodeJPEG(img image.Image) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func addXMPToJPEG(jpeg []byte, xmpXML string) ([]byte, error) {
+	// JPEG SOI marker
+	if len(jpeg) < 2 || jpeg[0] != 0xFF || jpeg[1] != 0xD8 {
+		return nil, fmt.Errorf("not a jpeg")
+	}
+
+	// XMP APP1 marker format
+	xmpHeader := []byte("http://ns.adobe.com/xap/1.0/\x00")
+
+	payload := append(xmpHeader, []byte(xmpXML)...)
+
+	segmentLength := len(payload) + 2
+
+	app1 := []byte{
+		0xFF, 0xE1,
+		byte(segmentLength >> 8),
+		byte(segmentLength & 0xFF),
+	}
+
+	app1 = append(app1, payload...)
+
+	var out bytes.Buffer
+
+	// Write SOI
+	out.Write(jpeg[:2])
+
+	// Insert APP1 segment immediately after SOI
+	out.Write(app1)
+
+	// Rest of JPEG
+	out.Write(jpeg[2:])
+
+	return out.Bytes(), nil
 }

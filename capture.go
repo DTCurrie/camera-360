@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"go.viam.com/rdk/logging"
 )
@@ -58,7 +57,7 @@ func NewCapture(ctx context.Context, rtspURL string, logger logging.Logger) (*Ca
 // restarts it if it exits while the context is still live.
 func (c *Capture) runLoop(ctx context.Context) {
 	defer c.wg.Done()
-	backoff := time.Second
+
 	for {
 		if ctx.Err() != nil {
 			return
@@ -67,18 +66,12 @@ func (c *Capture) runLoop(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			c.logger.Warnw("ffmpeg session ended; will retry", "err", err, "backoff", backoff)
+			c.logger.Warnw("ffmpeg session ended; will retry", "err", err)
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(backoff):
 			}
-			if backoff < 10*time.Second {
-				backoff *= 2
-			}
-			continue
 		}
-		backoff = time.Second
 	}
 }
 
