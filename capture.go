@@ -110,7 +110,7 @@ func (c *Capture) runOnce(ctx context.Context) error {
 		for {
 			n, rerr := stderr.Read(buf)
 			if n > 0 {
-				c.logger.Debugw("ffmpeg stderr", "out", string(buf[:n]))
+				c.logger.Warnw("ffmpeg stderr", "out", string(buf[:n]))
 			}
 			if rerr != nil {
 				return
@@ -141,11 +141,20 @@ func (c *Capture) decodeStream(r io.Reader) error {
 	// frame and Decode #2 fails to find an SOI marker. Holding one bufio for
 	// the lifetime of the stream preserves the carry-over between frames.
 	br := bufio.NewReader(r)
+	var frames int
 	for {
 		img, err := jpeg.Decode(br)
 		if err != nil {
+			// Peek at whatever is at the front of the buffer so we can tell
+			// the difference between "ffmpeg wrote garbage" and "we ate the
+			// SOI bytes somewhere". A healthy MJPEG stream starts every frame
+			// with ff d8.
+			peek, _ := br.Peek(32)
+			c.logger.Warnw("jpeg decode failed",
+				"err", err, "frames_decoded", frames, "peek_hex", fmt.Sprintf("%x", peek))
 			return err
 		}
+		frames++
 		c.latest.Store(&img)
 		c.gotFirstOnce.Do(func() { close(c.gotFirstFrame) })
 	}
