@@ -305,13 +305,22 @@ func (c *camera360Camera) Images(ctx context.Context, filterSourceNames []string
 		out = append(out, ni)
 		return nil
 	}
-	// Equirectangular goes first so that the web video stream — which calls
-	// Images(ctx, nil, nil) and picks the first streamable result — shows the
-	// stitched 360 view rather than the dual-fisheye raw frame. Consumers
-	// that need a specific source pass it in filterSourceNames and read by
-	// name, so the order doesn't affect them.
 	if want(SourceEquirectangular) {
-		if err := add(erp, SourceEquirectangular); err != nil {
+		xmp := `
+		<x:xmpmeta xmlns:x="adobe:ns:meta/">
+		<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+		<rdf:Description xmlns:viam="https://www.viam.com/ns/1.0/">
+		<viam:is360>true</viam:is360>
+		</rdf:Description>
+		</rdf:RDF>
+		</x:xmpmeta>
+		`
+		imagebytes, err := encodeJPEG(erp)
+		if err != nil {
+			return nil, resource.ResponseMetadata{}, fmt.Errorf("failed to encode equirectangular jpeg: %w", err)
+		}
+		imagebytes, err = addXMPToJPEG(imagebytes, xmp)
+		if err != nil {
 			return nil, resource.ResponseMetadata{}, err
 		}
 	}
@@ -567,4 +576,39 @@ func encodeJPEG(img image.Image) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func addXMPToJPEG(jpeg []byte, xmpXML string) ([]byte, error) {
+	// JPEG SOI marker
+	if len(jpeg) < 2 || jpeg[0] != 0xFF || jpeg[1] != 0xD8 {
+		return nil, fmt.Errorf("not a jpeg")
+	}
+
+	// XMP APP1 marker format
+	xmpHeader := []byte("http://ns.adobe.com/xap/1.0/\x00")
+
+	payload := append(xmpHeader, []byte(xmpXML)...)
+
+	segmentLength := len(payload) + 2
+
+	app1 := []byte{
+		0xFF, 0xE1,
+		byte(segmentLength >> 8),
+		byte(segmentLength & 0xFF),
+	}
+
+	app1 = append(app1, payload...)
+
+	var out bytes.Buffer
+
+	// Write SOI
+	out.Write(jpeg[:2])
+
+	// Insert APP1 segment immediately after SOI
+	out.Write(app1)
+
+	// Rest of JPEG
+	out.Write(jpeg[2:])
+
+	return out.Bytes(), nil
 }

@@ -58,7 +58,8 @@ func NewCapture(ctx context.Context, rtspURL string, logger logging.Logger) (*Ca
 // restarts it if it exits while the context is still live.
 func (c *Capture) runLoop(ctx context.Context) {
 	defer c.wg.Done()
-	backoff := time.Second
+
+	backoff := time.Millisecond * 1
 	for {
 		if ctx.Err() != nil {
 			return
@@ -72,13 +73,9 @@ func (c *Capture) runLoop(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-time.After(backoff):
+				continue
 			}
-			if backoff < 10*time.Second {
-				backoff *= 2
-			}
-			continue
 		}
-		backoff = time.Second
 	}
 }
 
