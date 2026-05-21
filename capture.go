@@ -1,6 +1,7 @@
 package camera360
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -125,6 +126,13 @@ func (c *Capture) runOnce(ctx context.Context) error {
 	}()
 
 	decodeErr := c.decodeStream(stdout)
+	// If decode stopped for any reason other than ffmpeg having shut its
+	// stdout (EOF), ffmpeg is still alive and will block on its next stdout
+	// write now that nobody is reading. Kill it so Wait can return and the
+	// outer loop can retry; otherwise the whole capture wedges on frame 1.
+	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
 	waitErr := cmd.Wait()
 	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
 		return decodeErr
@@ -133,8 +141,15 @@ func (c *Capture) runOnce(ctx context.Context) error {
 }
 
 func (c *Capture) decodeStream(r io.Reader) error {
+	// jpeg.Decode wraps a non-ByteReader argument in a fresh bufio.Reader on
+	// every call and discards whatever it had read ahead when it returns. For
+	// an MJPEG-over-image2pipe stream the lookahead always crosses into the
+	// next JPEG, so a new bufio per call loses the start of every subsequent
+	// frame and Decode #2 fails to find an SOI marker. Holding one bufio for
+	// the lifetime of the stream preserves the carry-over between frames.
+	br := bufio.NewReader(r)
 	for {
-		img, err := jpeg.Decode(r)
+		img, err := jpeg.Decode(br)
 		if err != nil {
 			return err
 		}
