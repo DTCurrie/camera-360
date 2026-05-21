@@ -305,6 +305,16 @@ func (c *camera360Camera) Images(ctx context.Context, filterSourceNames []string
 		out = append(out, ni)
 		return nil
 	}
+	// Equirectangular goes first so that the web video stream — which calls
+	// Images(ctx, nil, nil) and picks the first streamable result — shows the
+	// stitched 360 view rather than the dual-fisheye raw frame. Consumers
+	// that need a specific source pass it in filterSourceNames and read by
+	// name, so the order doesn't affect them.
+	if want(SourceEquirectangular) {
+		if err := add(erp, SourceEquirectangular); err != nil {
+			return nil, resource.ResponseMetadata{}, err
+		}
+	}
 	if want(SourceRaw) {
 		if err := add(raw, SourceRaw); err != nil {
 			return nil, resource.ResponseMetadata{}, err
@@ -317,11 +327,6 @@ func (c *camera360Camera) Images(ctx context.Context, filterSourceNames []string
 	}
 	if want(SourceBack) {
 		if err := add(c.stitcher.HalfFrame(raw, "back"), SourceBack); err != nil {
-			return nil, resource.ResponseMetadata{}, err
-		}
-	}
-	if want(SourceEquirectangular) {
-		if err := add(erp, SourceEquirectangular); err != nil {
 			return nil, resource.ResponseMetadata{}, err
 		}
 	}
