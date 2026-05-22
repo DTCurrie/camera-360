@@ -259,3 +259,17 @@ above; pitch is positive-up.
 [`akaso_360/README.md`](akaso_360/README.md) for the Ambarella JSON
 control protocol (which other AKASO / Ambarella-based cameras may
 share) and the `akaso_360/probe/` scripts for runnable probes.
+
+**Repeated `traces export: ... connect: network is unreachable` in
+the module's stderr** — the OpenTelemetry SDK (pulled in transitively
+by viam-rdk) is trying to ship spans to a Viam telemetry endpoint and
+your host has no route to it (typical on a Pi without IPv6 / offline
+deployments). This is log noise rather than a functional failure, but
+silences cleanly by disabling the SDK in the module's environment.
+Add to the component's module config in the robot's machine config:
+
+```json
+"env": {
+  "OTEL_SDK_DISABLED": "true"
+}
+```

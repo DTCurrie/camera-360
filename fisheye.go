@@ -2,6 +2,7 @@ package camera360
 
 import (
 	"image"
+	"image/color"
 	"math"
 	"sync"
 )
@@ -335,6 +336,14 @@ func (s *FisheyeStitcher) StitchToERP(frame image.Image) *image.RGBA {
 	if s.table == nil {
 		return dst
 	}
+	// Fast path: jpeg.Decode returns *image.YCbCr for color JPEGs. Going
+	// through the image.Image interface (At + RGBA per sample) costs ~7M
+	// interface calls per 1920×960 ERP on a 4-corner bilinear stitch — on a
+	// Pi that's the difference between sub-second and many-seconds per frame.
+	if ycc, ok := frame.(*image.YCbCr); ok {
+		s.stitchToERPYCbCr(ycc, dst)
+		return dst
+	}
 	for i, smp := range s.table {
 		var r, g, b uint8
 		if smp.frontWeight >= 1 {
@@ -357,6 +366,102 @@ func (s *FisheyeStitcher) StitchToERP(frame image.Image) *image.RGBA {
 	return dst
 }
 
+// stitchToERPYCbCr is the YCbCr fast path. It reads Y/Cb/Cr planes directly
+// (skipping image.Image dispatch) and bilinear-interpolates in YCbCr space,
+// converting to RGB once per output pixel instead of once per sampled corner.
+func (s *FisheyeStitcher) stitchToERPYCbCr(src *image.YCbCr, dst *image.RGBA) {
+	b := src.Rect
+	minX, minY := b.Min.X, b.Min.Y
+	maxX, maxY := b.Max.X-1, b.Max.Y-1
+	yStride := src.YStride
+	cStride := src.CStride
+	// COffset for an arbitrary x is computed as
+	// (y-Rect.Min.Y)/yRatio*CStride + (x-Rect.Min.X)/xRatio. Encoding the
+	// ratio as a shift keeps the inner loop branchless for the common 4:2:0
+	// case but still handles every subsampling mode YCbCr supports.
+	var xShift, yShift uint
+	switch src.SubsampleRatio {
+	case image.YCbCrSubsampleRatio444:
+		xShift, yShift = 0, 0
+	case image.YCbCrSubsampleRatio422:
+		xShift, yShift = 1, 0
+	case image.YCbCrSubsampleRatio420:
+		xShift, yShift = 1, 1
+	case image.YCbCrSubsampleRatio440:
+		xShift, yShift = 0, 1
+	case image.YCbCrSubsampleRatio411:
+		xShift, yShift = 2, 0
+	case image.YCbCrSubsampleRatio410:
+		xShift, yShift = 2, 1
+	default:
+		xShift, yShift = 0, 0
+	}
+
+	sampleYCbCr := func(x, y int, dx, dy float32) (yOut, cbOut, crOut float32) {
+		x0 := x
+		if x0 < minX {
+			x0 = minX
+		} else if x0 > maxX {
+			x0 = maxX
+		}
+		x1 := x0 + 1
+		if x1 > maxX {
+			x1 = maxX
+		}
+		y0 := y
+		if y0 < minY {
+			y0 = minY
+		} else if y0 > maxY {
+			y0 = maxY
+		}
+		y1 := y0 + 1
+		if y1 > maxY {
+			y1 = maxY
+		}
+		yo00 := (y0-minY)*yStride + (x0 - minX)
+		yo10 := (y0-minY)*yStride + (x1 - minX)
+		yo01 := (y1-minY)*yStride + (x0 - minX)
+		yo11 := (y1-minY)*yStride + (x1 - minX)
+		co00 := ((y0 - minY) >> yShift) * cStride
+		co01 := ((y1 - minY) >> yShift) * cStride
+		cx0 := (x0 - minX) >> xShift
+		cx1 := (x1 - minX) >> xShift
+		w00 := (1 - dx) * (1 - dy)
+		w10 := dx * (1 - dy)
+		w01 := (1 - dx) * dy
+		w11 := dx * dy
+		yOut = w00*float32(src.Y[yo00]) + w10*float32(src.Y[yo10]) +
+			w01*float32(src.Y[yo01]) + w11*float32(src.Y[yo11])
+		cbOut = w00*float32(src.Cb[co00+cx0]) + w10*float32(src.Cb[co00+cx1]) +
+			w01*float32(src.Cb[co01+cx0]) + w11*float32(src.Cb[co01+cx1])
+		crOut = w00*float32(src.Cr[co00+cx0]) + w10*float32(src.Cr[co00+cx1]) +
+			w01*float32(src.Cr[co01+cx0]) + w11*float32(src.Cr[co01+cx1])
+		return
+	}
+
+	for i, smp := range s.table {
+		var yF, cbF, crF float32
+		switch {
+		case smp.frontWeight >= 1:
+			yF, cbF, crF = sampleYCbCr(int(smp.frontX), int(smp.frontY), smp.frontDX, smp.frontDY)
+		case smp.frontWeight <= 0:
+			yF, cbF, crF = sampleYCbCr(int(smp.backX), int(smp.backY), smp.backDX, smp.backDY)
+		default:
+			yA, cbA, crA := sampleYCbCr(int(smp.frontX), int(smp.frontY), smp.frontDX, smp.frontDY)
+			yB, cbB, crB := sampleYCbCr(int(smp.backX), int(smp.backY), smp.backDX, smp.backDY)
+			w := smp.frontWeight
+			yF = yA*w + yB*(1-w)
+			cbF = cbA*w + cbB*(1-w)
+			crF = crA*w + crB*(1-w)
+		}
+		r, g, bb := color.YCbCrToRGB(uint8(yF), uint8(cbF), uint8(crF))
+		dst.Pix[i*4+0] = r
+		dst.Pix[i*4+1] = g
+		dst.Pix[i*4+2] = bb
+		dst.Pix[i*4+3] = 255
+	}
+}
+
 // HalfFrame extracts one half of the dual-fisheye frame as a new RGBA image.
 // half=="front" returns the right half, "back" the left half.
 func (s *FisheyeStitcher) HalfFrame(frame image.Image, half string) *image.RGBA {
@@ -371,6 +476,10 @@ func (s *FisheyeStitcher) HalfFrame(frame image.Image, half string) *image.RGBA 
 		return nil
 	}
 	out := image.NewRGBA(image.Rect(0, 0, r.Dx(), r.Dy()))
+	if ycc, ok := frame.(*image.YCbCr); ok {
+		halfFrameYCbCr(ycc, r, out)
+		return out
+	}
 	for y := 0; y < r.Dy(); y++ {
 		for x := 0; x < r.Dx(); x++ {
 			c := frame.At(r.Min.X+x, r.Min.Y+y)
@@ -383,6 +492,28 @@ func (s *FisheyeStitcher) HalfFrame(frame image.Image, half string) *image.RGBA 
 		}
 	}
 	return out
+}
+
+// halfFrameYCbCr copies a rectangular region of a YCbCr image into an RGBA
+// destination, converting each pixel via the JPEG-standard YCbCr→RGB formula
+// without going through image.Image dispatch.
+func halfFrameYCbCr(src *image.YCbCr, region image.Rectangle, dst *image.RGBA) {
+	w, h := region.Dx(), region.Dy()
+	dstStride := dst.Stride
+	for y := 0; y < h; y++ {
+		srcY := region.Min.Y + y
+		for x := 0; x < w; x++ {
+			srcX := region.Min.X + x
+			yi := src.YOffset(srcX, srcY)
+			ci := src.COffset(srcX, srcY)
+			r, g, b := color.YCbCrToRGB(src.Y[yi], src.Cb[ci], src.Cr[ci])
+			o := y*dstStride + x*4
+			dst.Pix[o+0] = r
+			dst.Pix[o+1] = g
+			dst.Pix[o+2] = b
+			dst.Pix[o+3] = 255
+		}
+	}
 }
 
 // bilinearRGB does a clamped bilinear sample of an arbitrary image.Image.

@@ -115,6 +115,13 @@ func (l *PinholeLUT) Apply(erp image.Image) *image.RGBA {
 	}
 	erpW, erpH := l.erpW, l.erpH
 
+	// Fast path: the stitcher always hands us an *image.RGBA, so reading
+	// Pix directly avoids ~3.7M At/RGBA dispatches per 1280×720 frame.
+	if rgba, ok := erp.(*image.RGBA); ok {
+		l.applyRGBA(rgba, dst)
+		return dst
+	}
+
 	for i, s := range l.table {
 		x0 := int(s.x0)
 		y0 := int(s.y0)
@@ -137,6 +144,43 @@ func (l *PinholeLUT) Apply(erp image.Image) *image.RGBA {
 		dst.Pix[i*4+3] = 255
 	}
 	return dst
+}
+
+func (l *PinholeLUT) applyRGBA(src, dst *image.RGBA) {
+	erpW, erpH := l.erpW, l.erpH
+	stride := src.Stride
+	pix := src.Pix
+	bMinX, bMinY := src.Rect.Min.X, src.Rect.Min.Y
+	for i, s := range l.table {
+		x0 := int(s.x0)
+		y0 := int(s.y0)
+		x1 := x0 + 1
+		if x1 >= erpW {
+			x1 = 0
+		}
+		y1 := y0 + 1
+		if y1 >= erpH {
+			y1 = erpH - 1
+		}
+		o00 := (y0-bMinY)*stride + (x0-bMinX)*4
+		o10 := (y0-bMinY)*stride + (x1-bMinX)*4
+		o01 := (y1-bMinY)*stride + (x0-bMinX)*4
+		o11 := (y1-bMinY)*stride + (x1-bMinX)*4
+		w00 := (1 - s.dx) * (1 - s.dy)
+		w10 := s.dx * (1 - s.dy)
+		w01 := (1 - s.dx) * s.dy
+		w11 := s.dx * s.dy
+		r := w00*float32(pix[o00+0]) + w10*float32(pix[o10+0]) +
+			w01*float32(pix[o01+0]) + w11*float32(pix[o11+0])
+		g := w00*float32(pix[o00+1]) + w10*float32(pix[o10+1]) +
+			w01*float32(pix[o01+1]) + w11*float32(pix[o11+1])
+		b := w00*float32(pix[o00+2]) + w10*float32(pix[o10+2]) +
+			w01*float32(pix[o01+2]) + w11*float32(pix[o11+2])
+		dst.Pix[i*4+0] = clampU8(r)
+		dst.Pix[i*4+1] = clampU8(g)
+		dst.Pix[i*4+2] = clampU8(b)
+		dst.Pix[i*4+3] = 255
+	}
 }
 
 func bilinear4(c00, c10, c01, c11 color.Color, dx, dy float32) color.RGBA {
