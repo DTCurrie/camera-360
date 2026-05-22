@@ -3,7 +3,7 @@
   "module_id": "dtcurrie:camera-360",
   "visibility": "public",
   "url": "",
-  "description": "Viam camera driver for the 360 action camera. Stitches the dual-fisheye live stream into an equirectangular panorama and exposes a steerable virtual pinhole view. Requires ffmpeg on PATH and a one-time camera-side install (see README.md).",
+  "description": "Viam camera driver for 360 action cameras. Stitches the dual-fisheye live stream into an equirectangular panorama and exposes a steerable virtual pinhole view.",
   "applications": null,
   "markdown_link": "README.md",
   "entrypoint": "bin/camera-360",
