@@ -2,7 +2,7 @@
   "$schema": "https://dl.viam.dev/module.schema.json",
   "module_id": "dtcurrie:camera-360",
   "visibility": "public",
-  "url": "",
+  "url": "https://github.com/DTCurrie/camera-360",
   "description": "Viam camera driver for 360 action cameras. Stitches the dual-fisheye live stream into an equirectangular panorama and exposes a steerable virtual pinhole view.",
   "applications": null,
   "markdown_link": "README.md",
