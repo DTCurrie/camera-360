@@ -3,11 +3,19 @@
   "module_id": "dtcurrie:camera-360",
   "visibility": "public",
   "url": "https://github.com/DTCurrie/camera-360",
-  "description": "Viam camera driver for 360 action cameras. Stitches the dual-fisheye live stream into an equirectangular panorama and exposes a steerable virtual pinhole view.",
+  "description": "Viam camera driver for 360 cameras.",
   "applications": null,
   "markdown_link": "README.md",
   "entrypoint": "bin/camera-360",
   "first_run": "",
+  "models": [
+    { "api": "rdk:component:camera", "model": "dtcurrie:camera-360:camera" },
+    { "api": "rdk:component:camera", "model": "dtcurrie:camera-360:jvcu360" },
+    {
+      "api": "rdk:component:audio_in",
+      "model": "dtcurrie:camera-360:jvcu360-mic"
+    }
+  ],
   "build": {
     "build": "make module.tar.gz",
     "setup": "make setup",

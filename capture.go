@@ -21,8 +21,9 @@ import (
 // background goroutine; readers always get the most recently produced frame
 // (no queue, no backpressure — matches the rdk ffmpeg.go pattern).
 type Capture struct {
-	rtspURL string
-	logger  logging.Logger
+	inputArgs []string
+	label     string
+	logger    logging.Logger
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -35,16 +36,21 @@ type Capture struct {
 	cmd   *exec.Cmd
 }
 
-// NewCapture verifies ffmpeg is present, then spawns it pulling rtspURL. It
-// returns once the subprocess has started; callers should poll Latest() (or
-// use WaitFirstFrame) before assuming a frame is available.
-func NewCapture(ctx context.Context, rtspURL string, logger logging.Logger) (*Capture, error) {
+// NewCapture verifies ffmpeg is present, then spawns it with caller-supplied
+// input arguments (the flags up to and including "-i <source>") and decodes the
+// resulting MJPEG frames. This is the basic path, used by the USB/UVC models:
+// they pass v4l2 (Linux) or avfoundation (macOS) input args. It returns once the
+// subprocess has started; callers should poll Latest() (or use WaitFirstFrame)
+// before assuming a frame is available. label is a human-readable source
+// identifier used only in log lines.
+func NewCapture(ctx context.Context, inputArgs []string, label string, logger logging.Logger) (*Capture, error) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		return nil, fmt.Errorf("ffmpeg not found on PATH: %w", err)
 	}
 	innerCtx, cancel := context.WithCancel(context.Background())
 	c := &Capture{
-		rtspURL:       rtspURL,
+		inputArgs:     inputArgs,
+		label:         label,
 		logger:        logger,
 		cancel:        cancel,
 		gotFirstFrame: make(chan struct{}),
@@ -52,6 +58,12 @@ func NewCapture(ctx context.Context, rtspURL string, logger logging.Logger) (*Ca
 	c.wg.Add(1)
 	go c.runLoop(innerCtx)
 	return c, nil
+}
+
+// NewCaptureFromRTSP is the alternate path for network/RTSP 360 cameras: it
+// builds the RTSP-over-TCP input args and delegates to NewCapture.
+func NewCaptureFromRTSP(ctx context.Context, rtspURL string, logger logging.Logger) (*Capture, error) {
+	return NewCapture(ctx, []string{"-rtsp_transport", "tcp", "-i", rtspURL}, rtspURL, logger)
 }
 
 // runLoop spawns ffmpeg, decodes the JPEG stream from its stdout, and
@@ -80,16 +92,13 @@ func (c *Capture) runLoop(ctx context.Context) {
 }
 
 func (c *Capture) runOnce(ctx context.Context) error {
-	args := []string{
-		"-hide_banner",
-		"-loglevel", "warning",
-		"-rtsp_transport", "tcp",
-		"-i", c.rtspURL,
+	args := append([]string{"-hide_banner", "-loglevel", "warning"}, c.inputArgs...)
+	args = append(args,
 		"-f", "image2pipe",
 		"-vcodec", "mjpeg",
 		"-q:v", "4",
 		"pipe:1",
-	}
+	)
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -107,7 +116,7 @@ func (c *Capture) runOnce(ctx context.Context) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
-	c.logger.Infow("ffmpeg started", "args", args)
+	c.logger.Infow("ffmpeg started", "source", c.label, "args", args)
 
 	go func() {
 		buf := make([]byte, 4096)

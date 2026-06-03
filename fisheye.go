@@ -80,7 +80,7 @@ type StitcherOpts struct {
 type LensModel int
 
 const (
-	// LensEquisolid: r = 2·f·sin(θ/2). Common on consumer action cameras
+	// LensEquisolid: r = 2·f·sin(θ/2). Common on consumer 360 cameras
 	// (GoPro Max, Insta360, many SJCAM/AKASO variants). Empirically the
 	// best match for the AKASO 360 — visibly reduces seam ghosting at
 	// large θ compared to equidistant.

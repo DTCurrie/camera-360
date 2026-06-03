@@ -1,7 +1,7 @@
-// Smoke test for the camera-360 module: connects to a live AKASO 360 over
-// Wi-Fi, pulls one set of frames, and writes them to ./out/ for visual
-// inspection. Prerequisite: this Mac must be joined to the camera's Wi-Fi
-// hotspot (AK360_xxxx) before running.
+// Smoke test for the camera-360 module's RTSP camera: connects to a live 360
+// camera over RTSP, pulls one set of frames, and writes them to ./out/ for
+// visual inspection. The camera must be reachable first; for the AKASO 360
+// that means joining its Wi-Fi hotspot (AK360_xxxx) — see akaso_360/README.md.
 //
 //	go run ./cmd/cli
 package main

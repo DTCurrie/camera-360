@@ -1,9 +1,9 @@
-// Package camera360 implements a Viam camera component for the AKASO 360
-// action camera. The camera exposes a pre-stitched H.264 equirectangular
-// preview over RTSP, gated by an Ambarella JSON-over-TCP handshake on port
-// 7878. This module performs that handshake, consumes the RTSP stream via an
-// ffmpeg subprocess, and surfaces two named-image sources: the raw
-// equirectangular frame and a steerable virtual pinhole view.
+// Package camera360 implements Viam components for 360 cameras. It registers
+// several models: an RTSP camera that consumes a 360 H.264 stream (unlocked
+// via an Ambarella JSON-over-TCP handshake on port 7878 where the camera
+// requires it) and stitches dual-fisheye input into an equirectangular
+// panorama with a steerable virtual pinhole view; a USB (UVC) pass-through
+// camera; and a USB (UAC) microphone exposed as audio_in.
 package camera360
 
 import (
@@ -66,7 +66,7 @@ func init() {
 type Config struct {
 	// Host is the camera's IP on its Wi-Fi hotspot. Almost always
 	// 192.168.42.1 — the field exists for the rare firmware that uses a
-	// different gateway (e.g. 192.168.169.1 on some AKASO variants).
+	// different gateway (e.g. 192.168.169.1 on some variants).
 	Host string `json:"host,omitempty"`
 
 	// FrontLens / BackLens calibrate the two fisheye hemispheres. Centers
@@ -95,7 +95,7 @@ type Config struct {
 	BackExtrinsicPitchDeg float64 `json:"back_extrinsic_pitch_deg,omitempty"`
 	BackExtrinsicRollDeg  float64 `json:"back_extrinsic_roll_deg,omitempty"`
 
-	// LensModel: "equisolid" (default, best match for AKASO 360) or
+	// LensModel: "equisolid" (default; suits most 360 fisheye lenses) or
 	// "equidistant". Unknown values fall through to equisolid.
 	LensModel string `json:"lens_model,omitempty"`
 
@@ -184,14 +184,14 @@ func NewCamera(ctx context.Context, name resource.Name, conf *Config, logger log
 		back = *conf.BackLens
 	}
 
-	logger.Infow("opening AKASO 360", "host", host)
+	logger.Infow("opening 360 camera over RTSP", "host", host)
 	session, err := DialSession(ctx, host, defaultAmbarellaPort, logger)
 	if err != nil {
 		return nil, fmt.Errorf("ambarella session: %w", err)
 	}
 	logger.Infow("ambarella session established; opening rtsp", "url", session.RTSPURL())
 
-	capture, err := NewCapture(ctx, session.RTSPURL(), logger)
+	capture, err := NewCaptureFromRTSP(ctx, session.RTSPURL(), logger)
 	if err != nil {
 		_ = session.Close()
 		return nil, fmt.Errorf("rtsp capture: %w", err)
