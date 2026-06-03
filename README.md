@@ -100,6 +100,17 @@ go test ./...
 The `cmd/cli` and `cmd/uvc` tools write JPEG frames (and `mic.wav`) to
 `./out/` so you can visually inspect what each source produces.
 
+### Playground (local UI)
+
+For an interactive, cloud-free dev loop, [`playground/`](playground/README.md)
+is a SvelteKit app that renders Viam's
+[test-widgets](https://github.com/viamrobotics/test-widgets) against a companion
+local `viam-server`:
+
+```bash
+make playground                        # builds the module, runs viam-server + the app together
+```
+
 ## Repository layout
 
 ```
@@ -112,5 +123,6 @@ camera-360/
 ├── cmd/                                  # CLI tools (cli, offline, measure, uvc)
 ├── akaso_360/                            # AKASO-specific setup + reverse-engineering
 ├── jvcu360/                              # j5create JVCU360 docs + UVC probes
+├── playground/                           # SvelteKit dev app + local viam-server config
 └── dtcurrie_camera-360_camera.md         # RTSP model documentation
 ```

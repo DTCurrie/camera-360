@@ -1,3 +1,4 @@
+.PHONY: lint update test module all playground setup
 
 GO_BUILD_ENV :=
 GO_BUILD_FLAGS :=
@@ -31,6 +32,15 @@ endif
 module: test module.tar.gz
 
 all: test module.tar.gz
+
+playground/node_modules: 
+	cd playground && pnpm install
+
+playground: $(MODULE_BINARY) playground/node_modules
+	viam-server -config playground/viam-config.json & \
+	server_pid=$$!; \
+	trap "kill $$server_pid 2>/dev/null" EXIT INT TERM; \
+	cd playground && pnpm dev
 
 setup:
 	go mod tidy

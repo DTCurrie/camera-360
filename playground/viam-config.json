@@ -1,0 +1,37 @@
+{
+  "network": {
+    "fqdn": "camera-360-local",
+    "bind_address": "localhost:8080",
+    "no_tls": true
+  },
+  "modules": [
+    {
+      "type": "local",
+      "name": "camera-360",
+      "executable_path": "/Users/devin/Projects/camera-360/bin/camera-360"
+    }
+  ],
+  "components": [
+    {
+      "name": "jvcu360",
+      "api": "rdk:component:camera",
+      "model": "dtcurrie:camera-360:jvcu360",
+      "attributes": {
+        "video_device": "0",
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": 30
+      }
+    },
+    {
+      "name": "jvcu360-mic",
+      "api": "rdk:component:audio_in",
+      "model": "dtcurrie:camera-360:jvcu360-mic",
+      "attributes": {
+        "audio_device": ":2",
+        "sample_rate_hz": 48000,
+        "num_channels": 1
+      }
+    }
+  ]
+}
