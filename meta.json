@@ -14,6 +14,10 @@
     {
       "api": "rdk:component:audio_in",
       "model": "dtcurrie:camera-360:uvc-mic"
+    },
+    {
+      "api": "rdk:service:discovery",
+      "model": "dtcurrie:camera-360:discovery"
     }
   ],
   "build": {

@@ -3,7 +3,8 @@
 // via an Ambarella JSON-over-TCP handshake on port 7878 where the camera
 // requires it) and stitches dual-fisheye input into an equirectangular
 // panorama with a steerable virtual pinhole view; a USB (UVC) pass-through
-// camera; and a USB (UAC) microphone exposed as audio_in.
+// camera; a USB (UAC) microphone exposed as audio_in; and a discovery service
+// that detects connected UVC webcams and emits ready-to-use camera/mic configs.
 package camera360
 
 import (

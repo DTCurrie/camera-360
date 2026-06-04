@@ -174,9 +174,12 @@ func TestDecodeStream_HandlesGarbageBetweenFrames(t *testing.T) {
 		logger:        logging.NewTestLogger(t),
 		gotFirstFrame: make(chan struct{}),
 	}
-	err := c.decodeStream(bytes.NewReader(stream))
+	frames, err := c.decodeStream(bytes.NewReader(stream))
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("decodeStream: want io.EOF after stream end, got %v", err)
+	}
+	if frames < 1 {
+		t.Fatalf("decodeStream: want at least one frame decoded, got %d", frames)
 	}
 	if c.latest.Load() == nil {
 		t.Fatal("no frame stored in latest")

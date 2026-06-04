@@ -53,7 +53,7 @@ func main() {
 	var err error
 	switch {
 	case *list:
-		err = listDevices()
+		err = listDevices(logger)
 	case *doAudio:
 		err = captureAudio(logger, *outDir, *audioDevice, *seconds)
 	case *doCapture:
@@ -69,10 +69,14 @@ func main() {
 	}
 }
 
-// listDevices prints the host OS's capture-device enumeration. ffmpeg's
-// avfoundation lister and v4l2-ctl both exit non-zero and/or write to stderr,
-// so we capture combined output and print it regardless of exit status.
-func listDevices() error {
+// listDevices prints the host OS's raw capture-device enumeration, then the
+// module's own structured view: which of those are confirmed UVC webcams, the
+// /dev/videoN and ALSA handles to configure, and any 360/fisheye classification.
+// The structured pass is the same code the discovery service uses (Linux-only).
+//
+// ffmpeg's avfoundation lister and v4l2-ctl both exit non-zero and/or write to
+// stderr, so we capture combined output and print it regardless of exit status.
+func listDevices(logger logging.Logger) error {
 	var name string
 	var args []string
 	switch runtime.GOOS {
@@ -87,6 +91,27 @@ func listDevices() error {
 	}
 	out, _ := exec.Command(name, args...).CombinedOutput()
 	fmt.Print(string(out))
+
+	webcams, err := camera360.EnumerateUVCWebcams(context.Background(), logger)
+	if err != nil {
+		return err
+	}
+	if len(webcams) == 0 {
+		fmt.Println("\nNo UVC webcams identified (sysfs detection is Linux-only).")
+		return nil
+	}
+	fmt.Println("\nIdentified UVC webcams:")
+	for _, w := range webcams {
+		lens := w.LensHint
+		if lens == "" {
+			lens = "uvc"
+		}
+		audio := w.AudioDevice
+		if audio == "" {
+			audio = "(none)"
+		}
+		fmt.Printf("  %-24s video=%s  audio=%s  usb=%s  lens=%s\n", w.Label, w.VideoDevice, audio, w.USBID, lens)
+	}
 	return nil
 }
 

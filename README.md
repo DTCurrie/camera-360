@@ -27,6 +27,9 @@ standard `audio_in`. See [`jvcu360/README.md`](jvcu360/README.md).
   (UVC) webcam, pass-through (tested on the j5create JVCU360)
 - [`dtcurrie:camera-360:uvc-mic`](dtcurrie_camera-360_uvc-mic.md) — USB (UAC)
   microphone exposed as `audio_in` (tested on the JVCU360's built-in mic)
+- [`dtcurrie:camera-360:discovery`](dtcurrie_camera-360_discovery.md) — discovery
+  service that finds connected UVC webcams (Linux) and emits ready-to-paste
+  `uvc-camera` / `uvc-mic` configs with the correct device handles
 
 ## Tested cameras
 
@@ -82,6 +85,32 @@ the prompt for you to approve and points you at the right settings.
 > one-time notice if it has to cap a larger request. **Linux** pulls the
 > native MJPEG over V4L2 and runs at full **1080p**, so deploy targets
 > are unaffected.
+
+## Discovering USB cameras
+
+Rather than hand-pick a `video_device`, add the
+[`dtcurrie:camera-360:discovery`](dtcurrie_camera-360_discovery.md) service and
+let it find connected UVC webcams for you. It returns ready-to-paste
+`uvc-camera` (and `uvc-mic`) configs with the correct `/dev/videoN` and ALSA
+handles already filled in — which is the easiest fix for the **Raspberry Pi**
+gotcha where the camera is at `/dev/video8+` (the Pi's internal ISP/codec blocks
+take the low numbers) and the `uvc-camera` default of `/dev/video0` fails.
+
+An empty config discovers 360/fisheye webcams with their mics:
+
+```json
+{}
+```
+
+Set `include_all_uvc` to `true` to return every UVC webcam (not just ones
+detected as 360/fisheye). Detection is **Linux-only**. Full reference:
+[`dtcurrie_camera-360_discovery.md`](dtcurrie_camera-360_discovery.md).
+
+You can preview what it will find from the CLI:
+
+```bash
+go run ./cmd/uvc -list
+```
 
 ## Quickstart (RTSP camera)
 
@@ -161,6 +190,7 @@ camera-360/
 ├── capture.go                           # ffmpeg frame capture (UVC + RTSP)
 ├── uvc.go, platform.go                  # USB (UVC) pass-through camera
 ├── uvc_mic.go, audiocapture.go          # USB (UAC) audio_in microphone
+├── discovery.go, enumerate.go           # UVC webcam discovery service (Linux sysfs)
 ├── cmd/                                  # CLI tools (cli, offline, measure, uvc)
 ├── akaso_360/                            # AKASO-specific setup + reverse-engineering
 ├── jvcu360/                              # j5create JVCU360 docs + UVC probes

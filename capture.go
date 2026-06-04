@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,6 +35,13 @@ type Capture struct {
 
 	cmdMu sync.Mutex
 	cmd   *exec.Cmd
+
+	// diag holds the most recent failure detail (ffmpeg's last stderr line and
+	// the last run/exit error) so a stalled first-frame wait can report *why*
+	// ffmpeg produced no frames, instead of a bare "context deadline exceeded".
+	diagMu     sync.Mutex
+	lastStderr string
+	lastRunErr error
 }
 
 // NewCapture verifies ffmpeg is present, then spawns it with caller-supplied
@@ -71,27 +79,47 @@ func NewCaptureFromRTSP(ctx context.Context, rtspURL string, logger logging.Logg
 func (c *Capture) runLoop(ctx context.Context) {
 	defer c.wg.Done()
 
-	backoff := time.Millisecond * 1
+	const (
+		initialBackoff = 250 * time.Millisecond
+		maxBackoff     = 3 * time.Second
+	)
+	backoff := initialBackoff
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := c.runOnce(ctx); err != nil {
+		frames, err := c.runOnce(ctx)
+		if frames > 0 {
+			// The run produced frames, so it was healthy; reset the backoff
+			// so a later transient restart recovers quickly.
+			backoff = initialBackoff
+		}
+		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
+			c.recordRunErr(err)
 			c.logger.Warnw("ffmpeg session ended; will retry", "err", err, "backoff", backoff)
 			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(backoff):
+				// Grow the backoff so a persistently misconfigured device
+				// (wrong node, unsupported format) doesn't hot-loop and bury
+				// the real error in retry spam.
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
 				continue
 			}
 		}
 	}
 }
 
-func (c *Capture) runOnce(ctx context.Context) error {
+// runOnce runs one ffmpeg session to completion and returns how many frames it
+// decoded along with the error that ended it (nil only on a clean EOF/exit).
+func (c *Capture) runOnce(ctx context.Context) (int, error) {
 	args := append([]string{"-hide_banner", "-loglevel", "warning"}, c.inputArgs...)
 	args = append(args,
 		"-f", "image2pipe",
@@ -102,11 +130,11 @@ func (c *Capture) runOnce(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	c.cmdMu.Lock()
@@ -114,7 +142,7 @@ func (c *Capture) runOnce(ctx context.Context) error {
 	c.cmdMu.Unlock()
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start ffmpeg: %w", err)
+		return 0, fmt.Errorf("start ffmpeg: %w", err)
 	}
 	c.logger.Infow("ffmpeg started", "source", c.label, "args", args)
 
@@ -123,7 +151,9 @@ func (c *Capture) runOnce(ctx context.Context) error {
 		for {
 			n, rerr := stderr.Read(buf)
 			if n > 0 {
-				c.logger.Warnw("ffmpeg stderr", "out", string(buf[:n]))
+				out := string(buf[:n])
+				c.logger.Warnw("ffmpeg stderr", "out", out)
+				c.recordStderr(out)
 			}
 			if rerr != nil {
 				return
@@ -131,7 +161,7 @@ func (c *Capture) runOnce(ctx context.Context) error {
 		}
 	}()
 
-	decodeErr := c.decodeStream(stdout)
+	frames, decodeErr := c.decodeStream(stdout)
 	// If decode stopped for any reason other than ffmpeg having shut its
 	// stdout (EOF), ffmpeg is still alive and will block on its next stdout
 	// write now that nobody is reading. Kill it so Wait can return and the
@@ -141,12 +171,12 @@ func (c *Capture) runOnce(ctx context.Context) error {
 	}
 	waitErr := cmd.Wait()
 	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
-		return decodeErr
+		return frames, decodeErr
 	}
-	return waitErr
+	return frames, waitErr
 }
 
-func (c *Capture) decodeStream(r io.Reader) error {
+func (c *Capture) decodeStream(r io.Reader) (int, error) {
 	// jpeg.Decode wraps a non-ByteReader argument in a fresh bufio.Reader on
 	// every call and discards whatever it had read ahead when it returns. For
 	// an MJPEG-over-image2pipe stream the lookahead always crosses into the
@@ -154,7 +184,7 @@ func (c *Capture) decodeStream(r io.Reader) error {
 	// frame and Decode #2 fails to find an SOI marker. Holding one bufio for
 	// the lifetime of the stream preserves the carry-over between frames.
 	br := bufio.NewReader(r)
-	var frames int
+	frames := 0
 	for {
 		// Resync to the next FF D8. Even with a stable bufio across calls,
 		// jpeg.Decode can leave the reader positioned past EOI when an
@@ -163,14 +193,14 @@ func (c *Capture) decodeStream(r io.Reader) error {
 		// "missing SOI marker". Discarding up to the next SOI is cheap and
 		// keeps us aligned regardless of what ffmpeg emits.
 		if err := scanToSOI(br); err != nil {
-			return err
+			return frames, err
 		}
 		img, err := jpeg.Decode(br)
 		if err != nil {
 			peek, _ := br.Peek(32)
 			c.logger.Warnw("jpeg decode failed",
 				"err", err, "frames_decoded", frames, "peek_hex", fmt.Sprintf("%x", peek))
-			return err
+			return frames, err
 		}
 		frames++
 		c.latest.Store(&img)
@@ -209,12 +239,54 @@ func (c *Capture) Latest() (image.Image, error) {
 }
 
 // WaitFirstFrame blocks until the first frame has been decoded or ctx expires.
+// On timeout it folds in the most recent ffmpeg failure (see recordStderr /
+// recordRunErr) so the caller sees *why* no frame arrived rather than a bare
+// "context deadline exceeded".
 func (c *Capture) WaitFirstFrame(ctx context.Context) error {
 	select {
 	case <-c.gotFirstFrame:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		if diag := c.lastDiagnostic(); diag != "" {
+			return fmt.Errorf("%w: no frame from %q yet — last ffmpeg failure: %s", ctx.Err(), c.label, diag)
+		}
+		return fmt.Errorf("%w: no frame from %q yet and ffmpeg reported no error "+
+			"(is it a video-capture device that supports the configured format/size/frame-rate?)", ctx.Err(), c.label)
+	}
+}
+
+// recordStderr remembers ffmpeg's most recent (non-blank) stderr output. The
+// fatal error ffmpeg prints before exiting is the line that matters, and it is
+// the last thing written, so keeping the latest chunk captures it.
+func (c *Capture) recordStderr(s string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return
+	}
+	c.diagMu.Lock()
+	c.lastStderr = s
+	c.diagMu.Unlock()
+}
+
+// recordRunErr remembers the error that ended the most recent ffmpeg session.
+func (c *Capture) recordRunErr(err error) {
+	c.diagMu.Lock()
+	c.lastRunErr = err
+	c.diagMu.Unlock()
+}
+
+// lastDiagnostic returns a human-readable summary of the most recent ffmpeg
+// failure (its exit/decode error and/or its last stderr line), or "" if none.
+func (c *Capture) lastDiagnostic() string {
+	c.diagMu.Lock()
+	defer c.diagMu.Unlock()
+	switch {
+	case c.lastRunErr != nil && c.lastStderr != "":
+		return fmt.Sprintf("%v (%s)", c.lastRunErr, c.lastStderr)
+	case c.lastRunErr != nil:
+		return c.lastRunErr.Error()
+	default:
+		return c.lastStderr
 	}
 }
 
