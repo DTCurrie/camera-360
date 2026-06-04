@@ -28,8 +28,8 @@ import (
 )
 
 var (
-	// Camera is the model identifier registered with the RDK.
-	Camera = resource.NewModel("dtcurrie", "camera-360", "camera")
+	// AmbarellaCamera is the model identifier registered with the RDK.
+	AmbarellaCamera = resource.NewModel("dtcurrie", "camera-360", "ambarella-camera")
 
 	errNotSupported = errors.New("not supported by camera-360")
 )
@@ -54,16 +54,16 @@ const (
 )
 
 func init() {
-	resource.RegisterComponent(camera.API, Camera,
-		resource.Registration[camera.Camera, *Config]{
-			Constructor: newCamera360Camera,
+	resource.RegisterComponent(camera.API, AmbarellaCamera,
+		resource.Registration[camera.Camera, *AmbarellaConfig]{
+			Constructor: newAmbarellaCamera,
 		},
 	)
 }
 
-// Config is the user-supplied JSON config. Defaults are documented in the
+// AmbarellaConfig is the user-supplied JSON config. Defaults are documented in the
 // component's markdown page; all fields are optional.
-type Config struct {
+type AmbarellaConfig struct {
 	// Host is the camera's IP on its Wi-Fi hotspot. Almost always
 	// 192.168.42.1 — the field exists for the rare firmware that uses a
 	// different gateway (e.g. 192.168.169.1 on some variants).
@@ -112,7 +112,7 @@ type Config struct {
 // Validate accepts any combination of fields; we apply defaults at
 // construction. We return no dependencies — this camera doesn't reference
 // other Viam resources.
-func (cfg *Config) Validate(path string) ([]string, []string, error) {
+func (cfg *AmbarellaConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.PinholeWidth < 0 || cfg.PinholeHeight < 0 {
 		return nil, nil, fmt.Errorf("%s: pinhole_width/height must be non-negative", path)
 	}
@@ -122,12 +122,12 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	return nil, nil, nil
 }
 
-type camera360Camera struct {
+type ambarellaCamera struct {
 	resource.AlwaysRebuild
 
 	name   resource.Name
 	logger logging.Logger
-	cfg    *Config
+	cfg    *AmbarellaConfig
 
 	session   *Session
 	capture   *Capture
@@ -139,17 +139,17 @@ type camera360Camera struct {
 	wg         sync.WaitGroup
 }
 
-func newCamera360Camera(ctx context.Context, _ resource.Dependencies, rawConf resource.Config, logger logging.Logger) (camera.Camera, error) {
-	conf, err := resource.NativeConfig[*Config](rawConf)
+func newAmbarellaCamera(ctx context.Context, _ resource.Dependencies, rawConf resource.Config, logger logging.Logger) (camera.Camera, error) {
+	conf, err := resource.NativeConfig[*AmbarellaConfig](rawConf)
 	if err != nil {
 		return nil, err
 	}
-	return NewCamera(ctx, rawConf.ResourceName(), conf, logger)
+	return NewAmbarellaCamera(ctx, rawConf.ResourceName(), conf, logger)
 }
 
-// NewCamera is exposed for the CLI smoke test in cmd/cli/main.go; the regular
-// module path goes through newCamera360Camera.
-func NewCamera(ctx context.Context, name resource.Name, conf *Config, logger logging.Logger) (camera.Camera, error) {
+// NewAmbarellaCamera is exposed for the CLI smoke test in cmd/cli/main.go; the regular
+// module path goes through newAmbarellaCamera.
+func NewAmbarellaCamera(ctx context.Context, name resource.Name, conf *AmbarellaConfig, logger logging.Logger) (camera.Camera, error) {
 	host := conf.Host
 	if host == "" {
 		host = defaultHost
@@ -224,7 +224,7 @@ func NewCamera(ctx context.Context, name resource.Name, conf *Config, logger log
 	projector := NewPinholeProjector(view, erpW, erpH)
 
 	cctx, cancel := context.WithCancel(context.Background())
-	c := &camera360Camera{
+	c := &ambarellaCamera{
 		name:       name,
 		logger:     logger,
 		cfg:        conf,
@@ -245,7 +245,7 @@ func NewCamera(ctx context.Context, name resource.Name, conf *Config, logger log
 // preview if the control socket goes idle (the symptom is RTSP suddenly
 // 404'ing); a get_settings every few seconds is cheap and keeps the session
 // warm.
-func (c *camera360Camera) heartbeatLoop() {
+func (c *ambarellaCamera) heartbeatLoop() {
 	defer c.wg.Done()
 	t := time.NewTicker(heartbeatInterval)
 	defer t.Stop()
@@ -261,9 +261,9 @@ func (c *camera360Camera) heartbeatLoop() {
 	}
 }
 
-func (c *camera360Camera) Name() resource.Name { return c.name }
+func (c *ambarellaCamera) Name() resource.Name { return c.name }
 
-func (c *camera360Camera) Images(ctx context.Context, filterSourceNames []string, _ map[string]interface{}) ([]camera.NamedImage, resource.ResponseMetadata, error) {
+func (c *ambarellaCamera) Images(ctx context.Context, filterSourceNames []string, _ map[string]interface{}) ([]camera.NamedImage, resource.ResponseMetadata, error) {
 	// Block briefly for the first frame on a cold start. After that, Latest()
 	// always returns immediately with the most recent frame.
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -353,11 +353,11 @@ func (c *camera360Camera) Images(ctx context.Context, filterSourceNames []string
 	return out, resource.ResponseMetadata{CapturedAt: time.Now()}, nil
 }
 
-func (c *camera360Camera) NextPointCloud(_ context.Context, _ map[string]interface{}) (pointcloud.PointCloud, error) {
+func (c *ambarellaCamera) NextPointCloud(_ context.Context, _ map[string]interface{}) (pointcloud.PointCloud, error) {
 	return nil, errNotSupported
 }
 
-func (c *camera360Camera) Properties(_ context.Context) (camera.Properties, error) {
+func (c *ambarellaCamera) Properties(_ context.Context) (camera.Properties, error) {
 	return camera.Properties{
 		SupportsPCD: false,
 		ImageType:   camera.ColorStream,
@@ -366,7 +366,7 @@ func (c *camera360Camera) Properties(_ context.Context) (camera.Properties, erro
 	}, nil
 }
 
-func (c *camera360Camera) Stream(_ context.Context, _ ...gostream.ErrorHandler) (gostream.VideoStream, error) {
+func (c *ambarellaCamera) Stream(_ context.Context, _ ...gostream.ErrorHandler) (gostream.VideoStream, error) {
 	reader := gostream.VideoReaderFunc(func(ctx context.Context) (image.Image, func(), error) {
 		if err := c.capture.WaitFirstFrame(ctx); err != nil {
 			return nil, nil, err
@@ -380,7 +380,7 @@ func (c *camera360Camera) Stream(_ context.Context, _ ...gostream.ErrorHandler) 
 	return gostream.NewEmbeddedVideoStreamFromReader(reader), nil
 }
 
-func (c *camera360Camera) DoCommand(_ context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
+func (c *ambarellaCamera) DoCommand(_ context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
 	if v, ok := cmd["set_pinhole"]; ok {
 		params, ok := v.(map[string]interface{})
 		if !ok {
@@ -537,11 +537,11 @@ func stitchParamsToMap(p StitchParams) map[string]interface{} {
 	}
 }
 
-func (c *camera360Camera) Geometries(_ context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
+func (c *ambarellaCamera) Geometries(_ context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
 	return []spatialmath.Geometry{}, nil
 }
 
-func (c *camera360Camera) Status(_ context.Context) (map[string]interface{}, error) {
+func (c *ambarellaCamera) Status(_ context.Context) (map[string]interface{}, error) {
 	yaw, pitch, fov := c.projector.View()
 	return map[string]interface{}{
 		"rtsp_url":  c.session.RTSPURL(),
@@ -551,15 +551,15 @@ func (c *camera360Camera) Status(_ context.Context) (map[string]interface{}, err
 	}, nil
 }
 
-func (c *camera360Camera) SubscribeRTP(_ context.Context, _ int, _ rtppassthrough.PacketCallback) (rtppassthrough.Subscription, error) {
+func (c *ambarellaCamera) SubscribeRTP(_ context.Context, _ int, _ rtppassthrough.PacketCallback) (rtppassthrough.Subscription, error) {
 	return rtppassthrough.Subscription{}, errNotSupported
 }
 
-func (c *camera360Camera) Unsubscribe(_ context.Context, _ rtppassthrough.SubscriptionID) error {
+func (c *ambarellaCamera) Unsubscribe(_ context.Context, _ rtppassthrough.SubscriptionID) error {
 	return errNotSupported
 }
 
-func (c *camera360Camera) Close(_ context.Context) error {
+func (c *ambarellaCamera) Close(_ context.Context) error {
 	c.cancelFunc()
 	c.wg.Wait()
 	var firstErr error

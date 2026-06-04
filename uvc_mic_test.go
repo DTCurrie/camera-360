@@ -12,16 +12,16 @@ import (
 	"go.viam.com/rdk/logging"
 )
 
-func TestMicConfigValidate(t *testing.T) {
+func TestUVCMicConfigValidate(t *testing.T) {
 	cases := []struct {
 		name    string
-		cfg     MicConfig
+		cfg     UVCMicConfig
 		wantErr bool
 	}{
-		{"empty defaults ok", MicConfig{}, false},
-		{"explicit values ok", MicConfig{AudioDevice: "plughw:1,0", SampleRateHz: 48000, NumChannels: 1}, false},
-		{"negative sample rate", MicConfig{SampleRateHz: -1}, true},
-		{"negative channels", MicConfig{NumChannels: -1}, true},
+		{"empty defaults ok", UVCMicConfig{}, false},
+		{"explicit values ok", UVCMicConfig{AudioDevice: "plughw:1,0", SampleRateHz: 48000, NumChannels: 1}, false},
+		{"negative sample rate", UVCMicConfig{SampleRateHz: -1}, true},
+		{"negative channels", UVCMicConfig{NumChannels: -1}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,9 +52,9 @@ func TestAudioInputArgs(t *testing.T) {
 // testMic builds a mic with a tiny sample rate so chunks are small and the
 // arithmetic is easy to check: 1000Hz mono, 100ms chunks => 100 samples =>
 // 200 bytes (s16le) per chunk.
-func testMic(t *testing.T) *jvcu360Mic {
+func testMic(t *testing.T) *uvcMic {
 	t.Helper()
-	return &jvcu360Mic{logger: logging.NewTestLogger(t), sampleRate: 1000, numChannels: 1}
+	return &uvcMic{logger: logging.NewTestLogger(t), sampleRate: 1000, numChannels: 1}
 }
 
 const testBytesPerChunk = 200 // 1000Hz * 0.1s * 2 bytes * 1 channel

@@ -20,13 +20,13 @@ standard `audio_in`. See [`jvcu360/README.md`](jvcu360/README.md).
 
 ## Models
 
-- [`dtcurrie:camera-360:camera`](dtcurrie_camera-360_camera.md) —
-  RTSP 360 camera (dual-fisheye stitch + pinhole). Configuration
+- [`dtcurrie:camera-360:ambarella-camera`](dtcurrie_camera-360_ambarella-camera.md) —
+  Ambarella RTSP 360 camera (dual-fisheye stitch + pinhole). Configuration
   reference, source list, DoCommand schema, troubleshooting
-- [`dtcurrie:camera-360:jvcu360`](jvcu360/README.md) — USB (UVC) 360
-  webcam, pass-through
-- [`dtcurrie:camera-360:jvcu360-mic`](jvcu360/README.md) — the JVCU360's
-  built-in omnidirectional microphone (`audio_in`)
+- [`dtcurrie:camera-360:uvc-camera`](dtcurrie_camera-360_uvc-camera.md) — USB
+  (UVC) webcam, pass-through (tested on the j5create JVCU360)
+- [`dtcurrie:camera-360:uvc-mic`](dtcurrie_camera-360_uvc-mic.md) — USB (UAC)
+  microphone exposed as `audio_in` (tested on the JVCU360's built-in mic)
 
 ## Tested cameras
 
@@ -51,11 +51,52 @@ Regardless of camera:
 Vendor-specific subdirectories under this repo describe the network /
 firmware setup steps for each tested camera.
 
+## USB (UVC) cameras
+
+USB 360 webcams (e.g. the JVCU360) need no network setup, but there are
+two host-OS specifics worth knowing up front. Full per-model
+configuration is in [`jvcu360/README.md`](jvcu360/README.md).
+
+**macOS camera & microphone permissions.** Access is gated by macOS
+Privacy (TCC) and granted to the app that _runs the capture_ — your
+terminal during dev, or the `viam-server` service in production. The
+first capture triggers a system prompt; if it's missed or was previously
+denied, capture silently fails. To set it up or debug it, run the helper
+from the same terminal you'll launch the module from:
+
+```bash
+bash jvcu360/macos-permissions.sh
+```
+
+It auto-detects the camera/mic, provokes the prompts, opens the Privacy
+panes, and verifies it can read a frame and audio. A script cannot
+_grant_ TCC access (Apple requires explicit user consent) — it surfaces
+the prompt for you to approve and points you at the right settings.
+
+> [!IMPORTANT]
+> **macOS caps capture at 720p.** On macOS, `avfoundation` only exposes
+> _raw_ video for these devices — it cannot request the camera's native
+> MJPEG. The JVCU360's uncompressed 1080p mode advertises but does not
+> actually stream (it emits a single frozen frame), so on macOS the
+> module defaults to and hard-caps capture at **1280×720**, logging a
+> one-time notice if it has to cap a larger request. **Linux** pulls the
+> native MJPEG over V4L2 and runs at full **1080p**, so deploy targets
+> are unaffected.
+
 ## Quickstart (RTSP camera)
 
 For a USB (UVC) camera there's no setup — see
 [`jvcu360/README.md`](jvcu360/README.md). For an RTSP camera, once it's
-reachable (e.g. `ping 10.42.0.1` works), the component config is just:
+reachable, an **empty config works** — `host` defaults to `192.168.42.1`
+(the AKASO Wi-Fi hotspot address):
+
+```json
+{}
+```
+
+`host` is the only commonly-set field, and only when your camera is at a
+different address (it's specific to the RTSP model — the USB models use
+`video_device` / `audio_device` instead):
 
 ```json
 {
@@ -74,7 +115,7 @@ Add the component to your Viam machine config and the module will:
    `equirectangular`, `pinhole`)
 
 Full configuration schema and DoCommand semantics are in
-[`dtcurrie_camera-360_camera.md`](dtcurrie_camera-360_camera.md).
+[`dtcurrie_camera-360_ambarella-camera.md`](dtcurrie_camera-360_ambarella-camera.md).
 
 ## Development
 
@@ -115,14 +156,14 @@ make playground                        # builds the module, runs viam-server + t
 
 ```
 camera-360/
-├── module.go, session.go                 # RTSP 360 camera driver (Ambarella)
+├── ambarella.go, session.go             # RTSP 360 camera driver (Ambarella)
 ├── fisheye.go, pinhole.go               # stitching + projection
-├── capture.go                            # ffmpeg frame capture (UVC + RTSP)
-├── uvc.go, platform.go                   # USB (UVC) pass-through camera
-├── mic.go, audiocapture.go               # USB (UAC) audio_in microphone
+├── capture.go                           # ffmpeg frame capture (UVC + RTSP)
+├── uvc.go, platform.go                  # USB (UVC) pass-through camera
+├── uvc_mic.go, audiocapture.go          # USB (UAC) audio_in microphone
 ├── cmd/                                  # CLI tools (cli, offline, measure, uvc)
 ├── akaso_360/                            # AKASO-specific setup + reverse-engineering
 ├── jvcu360/                              # j5create JVCU360 docs + UVC probes
 ├── playground/                           # SvelteKit dev app + local viam-server config
-└── dtcurrie_camera-360_camera.md         # RTSP model documentation
+└── dtcurrie_camera-360_ambarella-camera.md # Ambarella RTSP model documentation
 ```

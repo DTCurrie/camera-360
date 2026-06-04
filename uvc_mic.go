@@ -15,10 +15,11 @@ import (
 	"go.viam.com/rdk/utils"
 )
 
-// JVCU360Mic is the model for the JVCU360's built-in omnidirectional
-// microphone, which enumerates as a standard USB Audio Class (UAC) capture
-// device. It implements the RDK audio_in API by shelling out to ffmpeg for PCM.
-var JVCU360Mic = resource.NewModel("dtcurrie", "camera-360", "jvcu360-mic")
+// UVCMic is the model for any USB Audio Class (UAC) capture device, such as a
+// webcam's built-in microphone. It implements the RDK audio_in API by shelling
+// out to ffmpeg for PCM. Tested on the j5create JVCU360's omnidirectional mic
+// (see jvcu360/README.md).
+var UVCMic = resource.NewModel("dtcurrie", "camera-360", "uvc-mic")
 
 const (
 	micDefaultSampleRate  = 48000
@@ -28,29 +29,29 @@ const (
 )
 
 func init() {
-	resource.RegisterComponent(audioin.API, JVCU360Mic,
-		resource.Registration[audioin.AudioIn, *MicConfig]{
-			Constructor: newJVCU360Mic,
+	resource.RegisterComponent(audioin.API, UVCMic,
+		resource.Registration[audioin.AudioIn, *UVCMicConfig]{
+			Constructor: newUVCMic,
 		},
 	)
 }
 
-// MicConfig is the user-supplied JSON config; all fields are optional.
-type MicConfig struct {
+// UVCMicConfig is the user-supplied JSON config; all fields are optional.
+type UVCMicConfig struct {
 	// AudioDevice is the OS handle for the mic: an ALSA device such as
 	// "plughw:1,0" on Linux, or an avfoundation audio index like ":0" on macOS.
 	// Empty uses the per-OS default — note that on Linux that is the system
-	// default input, so set this explicitly to the JVCU360's card.
+	// default input, so set this explicitly to the device's capture card.
 	AudioDevice string `json:"audio_device,omitempty"`
-	// SampleRateHz / NumChannels request a capture format. The JVCU360 mic is
-	// mono; 48000 Hz is a safe default.
+	// SampleRateHz / NumChannels request a capture format. Many webcam mics are
+	// mono (the JVCU360's is); 48000 Hz is a safe default.
 	SampleRateHz int `json:"sample_rate_hz,omitempty"`
 	NumChannels  int `json:"num_channels,omitempty"`
 }
 
 // Validate rejects negative values; defaults are applied at construction. No
 // dependencies — this mic doesn't reference other resources.
-func (cfg *MicConfig) Validate(path string) ([]string, []string, error) {
+func (cfg *UVCMicConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.SampleRateHz < 0 {
 		return nil, nil, fmt.Errorf("%s: sample_rate_hz must be non-negative", path)
 	}
@@ -60,7 +61,7 @@ func (cfg *MicConfig) Validate(path string) ([]string, []string, error) {
 	return nil, nil, nil
 }
 
-type jvcu360Mic struct {
+type uvcMic struct {
 	resource.Named
 	resource.AlwaysRebuild
 
@@ -71,17 +72,17 @@ type jvcu360Mic struct {
 	workers     goutils.StoppableWorkers
 }
 
-func newJVCU360Mic(ctx context.Context, _ resource.Dependencies, rawConf resource.Config, logger logging.Logger) (audioin.AudioIn, error) {
-	conf, err := resource.NativeConfig[*MicConfig](rawConf)
+func newUVCMic(ctx context.Context, _ resource.Dependencies, rawConf resource.Config, logger logging.Logger) (audioin.AudioIn, error) {
+	conf, err := resource.NativeConfig[*UVCMicConfig](rawConf)
 	if err != nil {
 		return nil, err
 	}
-	return NewMic(ctx, rawConf.ResourceName(), conf, logger)
+	return NewUVCMic(ctx, rawConf.ResourceName(), conf, logger)
 }
 
-// NewMic is exposed for the discovery CLI in cmd/uvc/main.go; the regular
-// module path goes through newJVCU360Mic.
-func NewMic(_ context.Context, name resource.Name, conf *MicConfig, logger logging.Logger) (audioin.AudioIn, error) {
+// NewUVCMic is exposed for the discovery CLI in cmd/uvc/main.go; the regular
+// module path goes through newUVCMic.
+func NewUVCMic(_ context.Context, name resource.Name, conf *UVCMicConfig, logger logging.Logger) (audioin.AudioIn, error) {
 	device := conf.AudioDevice
 	if device == "" {
 		device = defaultAudioDevice()
@@ -94,7 +95,7 @@ func NewMic(_ context.Context, name resource.Name, conf *MicConfig, logger loggi
 	if numChannels == 0 {
 		numChannels = micDefaultNumChannels
 	}
-	return &jvcu360Mic{
+	return &uvcMic{
 		Named:       name.AsNamed(),
 		logger:      logger,
 		audioDevice: device,
@@ -107,7 +108,7 @@ func NewMic(_ context.Context, name resource.Name, conf *MicConfig, logger loggi
 // GetAudio starts an ffmpeg PCM capture and streams fixed-size chunks on the
 // returned channel until durationSeconds elapses (0 = until the request context
 // or the component is closed). codec must be "pcm16" (the only format we emit).
-func (m *jvcu360Mic) GetAudio(reqCtx context.Context, codec string, durationSeconds float32, previousTimestampNs int64, _ map[string]interface{}) (chan *audioin.AudioChunk, error) {
+func (m *uvcMic) GetAudio(reqCtx context.Context, codec string, durationSeconds float32, previousTimestampNs int64, _ map[string]interface{}) (chan *audioin.AudioChunk, error) {
 	if codec != "" && codec != micCodec {
 		return nil, fmt.Errorf("unsupported codec %q; only %q is supported", codec, micCodec)
 	}
@@ -134,7 +135,7 @@ func (m *jvcu360Mic) GetAudio(reqCtx context.Context, codec string, durationSeco
 
 // streamPCM owns the ffmpeg subprocess for one GetAudio call and feeds its PCM
 // output to streamChunks.
-func (m *jvcu360Mic) streamPCM(ctx context.Context, out chan<- *audioin.AudioChunk, durationSeconds float32, previousTimestampNs int64) error {
+func (m *uvcMic) streamPCM(ctx context.Context, out chan<- *audioin.AudioChunk, durationSeconds float32, previousTimestampNs int64) error {
 	ac, err := NewAudioCapture(ctx, audioInputArgs(m.audioDevice), m.sampleRate, m.numChannels, m.logger)
 	if err != nil {
 		return err
@@ -146,7 +147,7 @@ func (m *jvcu360Mic) streamPCM(ctx context.Context, out chan<- *audioin.AudioChu
 // streamChunks slices a raw s16le PCM stream into fixed-duration AudioChunks
 // with monotonic timestamps. It is split out from streamPCM so it can be tested
 // against an in-memory reader without ffmpeg or a real device.
-func (m *jvcu360Mic) streamChunks(ctx context.Context, r io.Reader, out chan<- *audioin.AudioChunk, durationSeconds float32, previousTimestampNs int64) error {
+func (m *uvcMic) streamChunks(ctx context.Context, r io.Reader, out chan<- *audioin.AudioChunk, durationSeconds float32, previousTimestampNs int64) error {
 	samplesPerChunk := m.sampleRate * micChunkDurationMs / 1000
 	bytesPerChunk := samplesPerChunk * 2 * m.numChannels // s16le => 2 bytes per sample per channel
 	chunkDurationNs := int64(micChunkDurationMs) * 1e6
@@ -195,7 +196,7 @@ func (m *jvcu360Mic) streamChunks(ctx context.Context, r io.Reader, out chan<- *
 	}
 }
 
-func (m *jvcu360Mic) Properties(_ context.Context, _ map[string]interface{}) (utils.Properties, error) {
+func (m *uvcMic) Properties(_ context.Context, _ map[string]interface{}) (utils.Properties, error) {
 	return utils.Properties{
 		SupportedCodecs: []string{micCodec},
 		SampleRateHz:    int32(m.sampleRate),
@@ -205,11 +206,11 @@ func (m *jvcu360Mic) Properties(_ context.Context, _ map[string]interface{}) (ut
 
 // Geometries satisfies resource.Shaped for parity with the reference audio_in
 // implementation; the mic has no meaningful geometry.
-func (m *jvcu360Mic) Geometries(_ context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
+func (m *uvcMic) Geometries(_ context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
 	return []spatialmath.Geometry{}, nil
 }
 
-func (m *jvcu360Mic) Close(_ context.Context) error {
+func (m *uvcMic) Close(_ context.Context) error {
 	m.workers.Stop()
 	return nil
 }

@@ -14,39 +14,40 @@ import (
 	"go.viam.com/rdk/utils"
 )
 
-// JVCU360 is the model for the j5create JVCU360 USB 360 webcam. Phase 1 is a
-// straight UVC pass-through: it surfaces whatever frame the device is currently
-// producing — i.e. the display mode selected on its capacitive touch bar — with
-// no stitching or dewarping. The point of pass-through is to see, over the wire,
-// exactly what each of the device's six modes looks like (resolution and pixel
-// layout) before we decide how to process it.
-var JVCU360 = resource.NewModel("dtcurrie", "camera-360", "jvcu360")
+// UVCCamera is the model for any USB Video Class (UVC) webcam. Phase 1 is a
+// straight pass-through: it surfaces whatever frame the device is currently
+// producing — for a 360 camera, the display mode it is currently in — with no
+// stitching or dewarping. The point of pass-through is to see, over the wire,
+// exactly what the device outputs (resolution and pixel layout) before we
+// decide how to process it. Tested on the j5create JVCU360 (see jvcu360/README.md
+// for device-specific notes such as its six touch-bar modes).
+var UVCCamera = resource.NewModel("dtcurrie", "camera-360", "uvc-camera")
 
 const (
-	defaultJVCU360Width     = 1920
-	defaultJVCU360Height    = 1080
-	defaultJVCU360FrameRate = 30
-	defaultJVCU360Format    = "mjpeg"
+	defaultUVCFrameRate = 30
+	defaultUVCFormat    = "mjpeg"
 )
 
 func init() {
-	resource.RegisterComponent(camera.API, JVCU360,
-		resource.Registration[camera.Camera, *JVCU360Config]{
-			Constructor: newJVCU360Camera,
+	resource.RegisterComponent(camera.API, UVCCamera,
+		resource.Registration[camera.Camera, *UVCCameraConfig]{
+			Constructor: newUVCCamera,
 		},
 	)
 }
 
-// JVCU360Config is the user-supplied JSON config. All fields are optional; the
-// defaults match the JVCU360's native MJPEG 1080p30 output.
-type JVCU360Config struct {
+// UVCCameraConfig is the user-supplied JSON config. All fields are optional. The
+// frame-rate/format defaults match a typical UVC webcam's MJPEG 30fps output; the
+// default capture size is OS-specific (1080p on Linux, 720p on macOS — see
+// defaultVideoSize and ISSUES.md).
+type UVCCameraConfig struct {
 	// VideoDevice is the OS handle for the camera: a V4L2 node like
 	// "/dev/video0" on Linux, or an avfoundation device index like "0" on
 	// macOS. Empty uses the per-OS default.
 	VideoDevice string `json:"video_device,omitempty"`
-	// Width/Height/FrameRate request a capture format from the device. The
-	// JVCU360 advertises up to 1920x1080@30; its non-360 modes report smaller
-	// heights, which is one of the things pass-through capture reveals.
+	// Width/Height/FrameRate request a capture format from the device. A device
+	// may advertise several formats (e.g. the JVCU360 reports different heights
+	// per 360/non-360 mode), which is one of the things pass-through reveals.
 	Width     int `json:"width,omitempty"`
 	Height    int `json:"height,omitempty"`
 	FrameRate int `json:"frame_rate,omitempty"`
@@ -56,7 +57,7 @@ type JVCU360Config struct {
 
 // Validate applies defaults at construction; here we only reject negative
 // numbers. No dependencies — this camera doesn't reference other resources.
-func (cfg *JVCU360Config) Validate(path string) ([]string, []string, error) {
+func (cfg *UVCCameraConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.Width < 0 || cfg.Height < 0 {
 		return nil, nil, fmt.Errorf("%s: width/height must be non-negative", path)
 	}
@@ -66,7 +67,7 @@ func (cfg *JVCU360Config) Validate(path string) ([]string, []string, error) {
 	return nil, nil, nil
 }
 
-type jvcu360Camera struct {
+type uvcCamera struct {
 	resource.AlwaysRebuild
 
 	name      resource.Name
@@ -75,45 +76,48 @@ type jvcu360Camera struct {
 	capture   *Capture
 }
 
-func newJVCU360Camera(ctx context.Context, _ resource.Dependencies, rawConf resource.Config, logger logging.Logger) (camera.Camera, error) {
-	conf, err := resource.NativeConfig[*JVCU360Config](rawConf)
+func newUVCCamera(ctx context.Context, _ resource.Dependencies, rawConf resource.Config, logger logging.Logger) (camera.Camera, error) {
+	conf, err := resource.NativeConfig[*UVCCameraConfig](rawConf)
 	if err != nil {
 		return nil, err
 	}
-	return NewJVCU360Camera(ctx, rawConf.ResourceName(), conf, logger)
+	return NewUVCCamera(ctx, rawConf.ResourceName(), conf, logger)
 }
 
-// NewJVCU360Camera is exposed for the discovery CLI in cmd/uvc/main.go; the
-// regular module path goes through newJVCU360Camera.
-func NewJVCU360Camera(ctx context.Context, name resource.Name, conf *JVCU360Config, logger logging.Logger) (camera.Camera, error) {
+// NewUVCCamera is exposed for the discovery CLI in cmd/uvc/main.go; the
+// regular module path goes through newUVCCamera.
+func NewUVCCamera(ctx context.Context, name resource.Name, conf *UVCCameraConfig, logger logging.Logger) (camera.Camera, error) {
 	device := conf.VideoDevice
 	if device == "" {
 		device = defaultVideoDevice()
 	}
+	defaultWidth, defaultHeight := defaultVideoSize()
 	width := conf.Width
 	if width == 0 {
-		width = defaultJVCU360Width
+		width = defaultWidth
 	}
 	height := conf.Height
 	if height == 0 {
-		height = defaultJVCU360Height
+		height = defaultHeight
 	}
+	// Enforce the per-OS capture ceiling (logs once on macOS if it caps).
+	width, height = clampVideoSize(width, height, logger)
 	frameRate := conf.FrameRate
 	if frameRate == 0 {
-		frameRate = defaultJVCU360FrameRate
+		frameRate = defaultUVCFrameRate
 	}
 	inputFormat := conf.InputFormat
 	if inputFormat == "" {
-		inputFormat = defaultJVCU360Format
+		inputFormat = defaultUVCFormat
 	}
 
-	logger.Infow("opening JVCU360 over UVC",
+	logger.Infow("opening UVC camera",
 		"device", device, "size", fmt.Sprintf("%dx%d", width, height), "fps", frameRate)
 	cp, err := NewCapture(ctx, videoInputArgs(device, width, height, frameRate, inputFormat), device, logger)
 	if err != nil {
 		return nil, fmt.Errorf("uvc capture: %w", err)
 	}
-	return &jvcu360Camera{
+	return &uvcCamera{
 		name:      name,
 		logger:    logger,
 		frameRate: frameRate,
@@ -121,9 +125,9 @@ func NewJVCU360Camera(ctx context.Context, name resource.Name, conf *JVCU360Conf
 	}, nil
 }
 
-func (c *jvcu360Camera) Name() resource.Name { return c.name }
+func (c *uvcCamera) Name() resource.Name { return c.name }
 
-func (c *jvcu360Camera) Images(ctx context.Context, filterSourceNames []string, _ map[string]interface{}) ([]camera.NamedImage, resource.ResponseMetadata, error) {
+func (c *uvcCamera) Images(ctx context.Context, filterSourceNames []string, _ map[string]interface{}) ([]camera.NamedImage, resource.ResponseMetadata, error) {
 	// Pass-through exposes exactly one source; if a filter is given, it must
 	// ask for that source.
 	if len(filterSourceNames) > 0 {
@@ -156,11 +160,11 @@ func (c *jvcu360Camera) Images(ctx context.Context, filterSourceNames []string, 
 	return []camera.NamedImage{ni}, resource.ResponseMetadata{CapturedAt: time.Now()}, nil
 }
 
-func (c *jvcu360Camera) NextPointCloud(_ context.Context, _ map[string]interface{}) (pointcloud.PointCloud, error) {
+func (c *uvcCamera) NextPointCloud(_ context.Context, _ map[string]interface{}) (pointcloud.PointCloud, error) {
 	return nil, errNotSupported
 }
 
-func (c *jvcu360Camera) Properties(_ context.Context) (camera.Properties, error) {
+func (c *uvcCamera) Properties(_ context.Context) (camera.Properties, error) {
 	return camera.Properties{
 		SupportsPCD: false,
 		ImageType:   camera.ColorStream,
@@ -169,18 +173,18 @@ func (c *jvcu360Camera) Properties(_ context.Context) (camera.Properties, error)
 	}, nil
 }
 
-func (c *jvcu360Camera) Geometries(_ context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
+func (c *uvcCamera) Geometries(_ context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
 	return []spatialmath.Geometry{}, nil
 }
 
-func (c *jvcu360Camera) DoCommand(_ context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
+func (c *uvcCamera) DoCommand(_ context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
 	// Phase 1 is pass-through only; runtime controls (dewarping, a virtual
 	// servo/switch over the digital view) land in a later phase, informed by
 	// what these captures reveal about the device's output.
 	return nil, errNotSupported
 }
 
-func (c *jvcu360Camera) Status(_ context.Context) (map[string]interface{}, error) {
+func (c *uvcCamera) Status(_ context.Context) (map[string]interface{}, error) {
 	return map[string]interface{}{
 		"source":      SourceRaw,
 		"frame_rate":  c.frameRate,
@@ -188,6 +192,6 @@ func (c *jvcu360Camera) Status(_ context.Context) (map[string]interface{}, error
 	}, nil
 }
 
-func (c *jvcu360Camera) Close(_ context.Context) error {
+func (c *uvcCamera) Close(_ context.Context) error {
 	return c.capture.Close()
 }

@@ -22,6 +22,6 @@ export const dialConfigs: Record<string, DialConf> = {
 
 /** The resources declared in viam-config.json, in render order. */
 export const resources = [
-	{ kind: 'camera', name: 'jvcu360', label: 'JVCU360 (camera)' },
-	{ kind: 'audio_in', name: 'jvcu360-mic', label: 'JVCU360 mic (audio_in)' }
+	{ kind: 'camera', name: 'uvc-camera', label: 'UVC camera' },
+	{ kind: 'audio_in', name: 'uvc-mic', label: 'UVC mic (audio_in)' }
 ] as const;

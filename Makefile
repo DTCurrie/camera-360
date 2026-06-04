@@ -15,6 +15,7 @@ $(MODULE_BINARY): Makefile go.mod *.go cmd/module/*.go
 
 lint:
 	gofmt -s -w .
+	cd playground && pnpm check
 
 update:
 	go get go.viam.com/rdk@latest

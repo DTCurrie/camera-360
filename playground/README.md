@@ -5,15 +5,15 @@ renders Viam's [test-widgets](https://github.com/viamrobotics/test-widgets)
 (camera + audio_in) and talks to a companion `viam-server` running the module
 locally — no Viam cloud account required.
 
-By default it wires up the **JVCU360 USB webcam** (`jvcu360` camera +
-`jvcu360-mic` audio_in), which is the device that works out of the box on a dev
-machine. See [`viam-config.json`](viam-config.json).
+By default it wires up a **USB webcam** via the generic `uvc-camera` camera +
+`uvc-mic` audio_in models. The reference device is the j5create JVCU360, which
+works out of the box on a dev machine. See [`viam-config.json`](viam-config.json).
 
 ## Prerequisites
 
 - `viam-server` and `ffmpeg` on `PATH`.
 - Node + pnpm (this repo was built with node 24 / pnpm 10).
-- The JVCU360 plugged in. **Set the device indices** in
+- A UVC webcam plugged in. **Set the device indices** in
   [`viam-config.json`](viam-config.json) to match your machine — they are not
   fixed across hosts. On macOS, find them with:
 
@@ -43,9 +43,9 @@ cd playground && pnpm install && pnpm dev           # terminal 2
 
 The page lists each configured resource with its test widget:
 
-- **`jvcu360` (camera)** — `CameraWidget`: live/polling video, source select,
+- **`uvc-camera` (camera)** — `CameraWidget`: live/polling video, source select,
   360° view, screenshot.
-- **`jvcu360-mic` (audio_in)** — `AudioInputWidget`: codec select (`pcm16`),
+- **`uvc-mic` (audio_in)** — `AudioInputWidget`: codec select (`pcm16`),
   record, download.
 
 ## How the connection works
@@ -65,7 +65,9 @@ a local-only dev server.
 
 - **macOS permissions:** the OS prompts for camera/microphone access the first
   time the module opens the device (the request comes from the process running
-  `viam-server`). Grant both.
+  `viam-server`). Grant both. To do it up front / troubleshoot a denial, run
+  `bash jvcu360/macos-permissions.sh` from the same terminal — it provokes the
+  prompts, opens the Privacy panes, and verifies access.
 - **Single consumer:** only one process can hold the camera/mic at a time. Close
   Photo Booth / `cmd/uvc` / other apps using it before running the server.
 - **CORS fallback:** if the browser can't reach `localhost:8080` from the Vite

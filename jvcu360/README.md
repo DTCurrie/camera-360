@@ -10,39 +10,42 @@ This module ships two models for it:
 
 | Model | API | What it does |
 | ----- | --- | ------------ |
-| `dtcurrie:camera-360:jvcu360` | `rdk:component:camera` | UVC pass-through of the current frame as a single `raw` JPEG source |
-| `dtcurrie:camera-360:jvcu360-mic` | `rdk:component:audio_in` | The built-in omnidirectional mic (PCM s16, 48 kHz mono) |
+| [`dtcurrie:camera-360:uvc-camera`](../dtcurrie_camera-360_uvc-camera.md) | `rdk:component:camera` | UVC pass-through of the current frame as a single `raw` JPEG source |
+| [`dtcurrie:camera-360:uvc-mic`](../dtcurrie_camera-360_uvc-mic.md) | `rdk:component:audio_in` | The built-in omnidirectional mic (PCM s16, 48 kHz mono) |
+
+These are the module's generic UVC/UAC models — this page documents how they
+behave on the JVCU360 specifically. The full config schema for each is on its
+model page (linked above).
 
 ## Prerequisites
 
 - `ffmpeg` on `PATH` (used for both video and audio capture).
 - **Linux** (deploy): the camera is a V4L2 node (`/dev/videoN`) and an ALSA
   capture device. **macOS** (dev): both are reached via `avfoundation`.
+- **macOS camera/mic permissions:** access is gated by TCC and granted to the
+  app that runs the capture (your terminal during dev). Run
+  [`macos-permissions.sh`](macos-permissions.sh) from that terminal to provoke
+  the prompts, open the Privacy panes, and verify access. Note: on macOS the
+  device only streams up to 720p over avfoundation (it advertises 1080p but
+  freezes); the module defaults to and clamps at 1280×720 there. See
+  [`../ISSUES.md`](../ISSUES.md).
 
 ## Configuration
 
-**Camera** (`dtcurrie:camera-360:jvcu360`) — all fields optional:
+Full field schemas live on the model pages
+([uvc-camera](../dtcurrie_camera-360_uvc-camera.md),
+[uvc-mic](../dtcurrie_camera-360_uvc-mic.md)). The JVCU360-specific values to
+plug in:
 
-| Field | Default | Notes |
-| ----- | ------- | ----- |
-| `video_device` | `/dev/video0` (Linux), `0` (macOS) | V4L2 node, or avfoundation device index (see `-list`) |
-| `width` / `height` | `1920` / `1080` | Native sizes: 1920×1080, 1280×720, 640×480, 640×360 |
-| `frame_rate` | `30` | 15 or 30 |
-| `input_format` | `mjpeg` | V4L2 pixel format; ignored on macOS |
+- **Camera native capture sizes:** 1920×1080, 1280×720, 640×480, 640×360, at
+  `frame_rate` 15 or 30 (native `input_format` is `mjpeg`).
+- **Microphone:** mono (`num_channels` 1) at 48 kHz. On Linux, set `audio_device`
+  explicitly to the webcam's ALSA card (e.g. `plughw:1,0`) — the default is the
+  system input, not this device.
 
 ```json
 { "video_device": "/dev/video0", "width": 1920, "height": 1080 }
 ```
-
-**Microphone** (`dtcurrie:camera-360:jvcu360-mic`) — all fields optional:
-
-| Field | Default | Notes |
-| ----- | ------- | ----- |
-| `audio_device` | `default` (Linux), `:0` (macOS) | ALSA device (e.g. `plughw:1,0`) or avfoundation audio index (e.g. `:2`). On Linux set this explicitly to the webcam's card. |
-| `sample_rate_hz` | `48000` | |
-| `num_channels` | `1` | The mic is mono |
-
-`GetAudio` streams `pcm16` in 100 ms chunks; `codec` must be `pcm16`.
 
 ## Discovery CLI (`cmd/uvc`)
 

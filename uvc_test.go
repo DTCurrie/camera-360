@@ -5,17 +5,17 @@ import (
 	"testing"
 )
 
-func TestJVCU360ConfigValidate(t *testing.T) {
+func TestUVCCameraConfigValidate(t *testing.T) {
 	cases := []struct {
 		name    string
-		cfg     JVCU360Config
+		cfg     UVCCameraConfig
 		wantErr bool
 	}{
-		{"empty defaults ok", JVCU360Config{}, false},
-		{"explicit values ok", JVCU360Config{VideoDevice: "/dev/video0", Width: 1920, Height: 720, FrameRate: 30, InputFormat: "mjpeg"}, false},
-		{"negative width", JVCU360Config{Width: -1}, true},
-		{"negative height", JVCU360Config{Height: -1}, true},
-		{"negative frame rate", JVCU360Config{FrameRate: -1}, true},
+		{"empty defaults ok", UVCCameraConfig{}, false},
+		{"explicit values ok", UVCCameraConfig{VideoDevice: "/dev/video0", Width: 1920, Height: 720, FrameRate: 30, InputFormat: "mjpeg"}, false},
+		{"negative width", UVCCameraConfig{Width: -1}, true},
+		{"negative height", UVCCameraConfig{Height: -1}, true},
+		{"negative frame rate", UVCCameraConfig{FrameRate: -1}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

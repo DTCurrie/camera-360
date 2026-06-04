@@ -42,13 +42,13 @@ func run(host, outDir string, yaw, pitch, fov float64) error {
 	defer cancel()
 	logger := logging.NewLogger("camera-360-cli")
 
-	cfg := &camera360.Config{
+	cfg := &camera360.AmbarellaConfig{
 		Host:          host,
 		InitialYaw:    yaw,
 		InitialPitch:  pitch,
 		PinholeFOVDeg: fov,
 	}
-	cam, err := camera360.NewCamera(ctx, camera.Named("cli"), cfg, logger)
+	cam, err := camera360.NewAmbarellaCamera(ctx, camera.Named("cli"), cfg, logger)
 	if err != nil {
 		return fmt.Errorf("open camera: %w", err)
 	}

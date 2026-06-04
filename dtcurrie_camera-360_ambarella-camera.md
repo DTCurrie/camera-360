@@ -1,4 +1,4 @@
-# Model `dtcurrie:camera-360:camera`
+# Model `dtcurrie:camera-360:ambarella-camera`
 
 A 360-camera driver that pulls a single RTSP H.264 stream, stitches
 dual-fisheye input into an equirectangular (ERP) panorama, and exposes
@@ -10,13 +10,13 @@ in the repository (e.g. [`akaso_360/`](akaso_360/) for the AKASO 360).
 
 A single `Images()` call returns five named-image sources, in this order:
 
-| Source            | Type                          | Cost     | What it is                                                                                          |
-| ----------------- | ----------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
-| `raw`             | image/jpeg                    | free     | The full frame from the camera, exactly as decoded by ffmpeg (typically 1920×960 side-by-side fisheye) |
-| `front`           | image/jpeg                    | cheap    | Left half of the raw frame (front fisheye hemisphere). Crop only — no projection                    |
-| `back`            | image/jpeg                    | cheap    | Right half of the raw frame (back fisheye hemisphere). Crop only — no projection                    |
-| `equirectangular` | image/jpeg                    | medium   | Stitched ERP panorama built from `front` + `back` via the configured lens model. What `Stream()` emits |
-| `pinhole`         | image/jpeg                    | medium   | Virtual pinhole derived from the ERP using gnomonic projection. Aim via `DoCommand`                 |
+| Source            | Type       | Cost   | What it is                                                                                             |
+| ----------------- | ---------- | ------ | ------------------------------------------------------------------------------------------------------ |
+| `raw`             | image/jpeg | free   | The full frame from the camera, exactly as decoded by ffmpeg (typically 1920×960 side-by-side fisheye) |
+| `front`           | image/jpeg | cheap  | Left half of the raw frame (front fisheye hemisphere). Crop only — no projection                       |
+| `back`            | image/jpeg | cheap  | Right half of the raw frame (back fisheye hemisphere). Crop only — no projection                       |
+| `equirectangular` | image/jpeg | medium | Stitched ERP panorama built from `front` + `back` via the configured lens model. What `Stream()` emits |
+| `pinhole`         | image/jpeg | medium | Virtual pinhole derived from the ERP using gnomonic projection. Aim via `DoCommand`                    |
 
 `Images(ctx, filterSourceNames, ...)` honors the filter: pass
 `["pinhole"]` to skip the expensive stitch when you only need the
@@ -74,23 +74,23 @@ everything else.
 
 ### Attributes
 
-| Name                       | Type    | Inclusion | Default        | Description                                                                              |
-| -------------------------- | ------- | --------- | -------------- | ---------------------------------------------------------------------------------------- |
-| `host`                     | string  | Required  | `192.168.42.1` | IP address or hostname of the camera. Must be reachable from the host running the module |
-| `pinhole_width`            | int     | Optional  | `1280`         | Width of the `pinhole` output in pixels                                                  |
-| `pinhole_height`           | int     | Optional  | `720`          | Height of the `pinhole` output in pixels                                                 |
-| `pinhole_fov_deg`          | float   | Optional  | `90.0`         | Horizontal field-of-view of the pinhole view, in degrees. Range `(0, 180)`               |
-| `initial_yaw_deg`          | float   | Optional  | `0.0`          | Starting yaw of the pinhole view, in degrees                                             |
-| `initial_pitch_deg`        | float   | Optional  | `0.0`          | Starting pitch of the pinhole view, in degrees                                           |
-| `erp_width`                | int     | Optional  | `1920`         | Width of the stitched ERP output in pixels                                               |
-| `erp_height`               | int     | Optional  | `960`          | Height of the stitched ERP output in pixels                                              |
-| `seam_feather_deg`         | float   | Optional  | `6.0`          | Half-width (in degrees of longitude) of the seam-blend region where both lenses contribute |
-| `back_extrinsic_yaw_deg`   | float   | Optional  | `0.0`          | Yaw correction applied to the back lens during stitching (mechanical mis-alignment)      |
-| `back_extrinsic_pitch_deg` | float   | Optional  | `0.0`          | Pitch correction applied to the back lens                                                |
-| `back_extrinsic_roll_deg`  | float   | Optional  | `0.0`          | Roll correction applied to the back lens                                                 |
-| `lens_model`               | string  | Optional  | `equisolid`    | Fisheye projection model. One of `equisolid` (`r = 2f·sin(θ/2)`) or `equidistant` (`r = f·θ`) |
-| `front_lens`               | object  | Optional  | see below      | Image-plane parameters for the front fisheye                                             |
-| `back_lens`                | object  | Optional  | see below      | Image-plane parameters for the back fisheye                                              |
+| Name                       | Type   | Inclusion | Default        | Description                                                                                   |
+| -------------------------- | ------ | --------- | -------------- | --------------------------------------------------------------------------------------------- |
+| `host`                     | string | Required  | `192.168.42.1` | IP address or hostname of the camera. Must be reachable from the host running the module      |
+| `pinhole_width`            | int    | Optional  | `1280`         | Width of the `pinhole` output in pixels                                                       |
+| `pinhole_height`           | int    | Optional  | `720`          | Height of the `pinhole` output in pixels                                                      |
+| `pinhole_fov_deg`          | float  | Optional  | `90.0`         | Horizontal field-of-view of the pinhole view, in degrees. Range `(0, 180)`                    |
+| `initial_yaw_deg`          | float  | Optional  | `0.0`          | Starting yaw of the pinhole view, in degrees                                                  |
+| `initial_pitch_deg`        | float  | Optional  | `0.0`          | Starting pitch of the pinhole view, in degrees                                                |
+| `erp_width`                | int    | Optional  | `1920`         | Width of the stitched ERP output in pixels                                                    |
+| `erp_height`               | int    | Optional  | `960`          | Height of the stitched ERP output in pixels                                                   |
+| `seam_feather_deg`         | float  | Optional  | `6.0`          | Half-width (in degrees of longitude) of the seam-blend region where both lenses contribute    |
+| `back_extrinsic_yaw_deg`   | float  | Optional  | `0.0`          | Yaw correction applied to the back lens during stitching (mechanical mis-alignment)           |
+| `back_extrinsic_pitch_deg` | float  | Optional  | `0.0`          | Pitch correction applied to the back lens                                                     |
+| `back_extrinsic_roll_deg`  | float  | Optional  | `0.0`          | Roll correction applied to the back lens                                                      |
+| `lens_model`               | string | Optional  | `equisolid`    | Fisheye projection model. One of `equisolid` (`r = 2f·sin(θ/2)`) or `equidistant` (`r = f·θ`) |
+| `front_lens`               | object | Optional  | see below      | Image-plane parameters for the front fisheye                                                  |
+| `back_lens`                | object | Optional  | see below      | Image-plane parameters for the back fisheye                                                   |
 
 ### Lens object (`front_lens` / `back_lens`)
 

@@ -1,16 +1,16 @@
-// Discovery + capture tool for USB 360 webcams (the j5create JVCU360). It does
-// three things, selected by flags:
+// Discovery + capture tool for USB (UVC/UAC) webcams. It does three things,
+// selected by flags:
 //
 //	go run ./cmd/uvc -list                          # enumerate capture devices
 //	go run ./cmd/uvc -capture -frames 30 -out out   # grab JPEG frames to disk
 //	go run ./cmd/uvc -audio -seconds 3 -out out     # grab a WAV clip to disk
 //
-// The point of -capture is to see, over the wire, what each of the JVCU360's
-// six touch-bar display modes actually looks like (resolution + pixel layout)
-// before we build any dewarping on top. Switch the mode on the device's touch
-// bar between runs to capture each one. Prerequisite: ffmpeg on PATH, and on
-// Linux a V4L2 node (/dev/videoN); pass -video-device / -audio-device to target
-// a specific device (see -list output).
+// The point of -capture is to see, over the wire, exactly what the device
+// outputs (resolution + pixel layout) before we build any dewarping on top. For
+// a multi-mode 360 camera like the j5create JVCU360, switch the mode on the
+// device between runs to capture each one (see jvcu360/README.md). Prerequisite:
+// ffmpeg on PATH, and on Linux a V4L2 node (/dev/videoN); pass -video-device /
+// -audio-device to target a specific device (see -list output).
 package main
 
 import (
@@ -43,8 +43,8 @@ func main() {
 		outDir      = flag.String("out", "out", "output directory")
 		videoDevice = flag.String("video-device", "", "video device (default per-OS)")
 		audioDevice = flag.String("audio-device", "", "audio device (default per-OS)")
-		width       = flag.Int("width", 1920, "capture width")
-		height      = flag.Int("height", 1080, "capture height")
+		width       = flag.Int("width", 0, "capture width (0 = per-OS default)")
+		height      = flag.Int("height", 0, "capture height (0 = per-OS default)")
 		fps         = flag.Int("fps", 30, "capture frame rate")
 	)
 	flag.Parse()
@@ -95,8 +95,8 @@ func captureFrames(logger logging.Logger, outDir, device string, frames, width, 
 		return err
 	}
 	ctx := context.Background()
-	cfg := &camera360.JVCU360Config{VideoDevice: device, Width: width, Height: height, FrameRate: fps}
-	cam, err := camera360.NewJVCU360Camera(ctx, camera.Named("uvc-cli"), cfg, logger)
+	cfg := &camera360.UVCCameraConfig{VideoDevice: device, Width: width, Height: height, FrameRate: fps}
+	cam, err := camera360.NewUVCCamera(ctx, camera.Named("uvc-cli"), cfg, logger)
 	if err != nil {
 		return fmt.Errorf("open camera: %w", err)
 	}
@@ -134,7 +134,7 @@ func captureAudio(logger logging.Logger, outDir, device string, seconds float64)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mic, err := camera360.NewMic(ctx, audioin.Named("uvc-cli-mic"), &camera360.MicConfig{AudioDevice: device}, logger)
+	mic, err := camera360.NewUVCMic(ctx, audioin.Named("uvc-cli-mic"), &camera360.UVCMicConfig{AudioDevice: device}, logger)
 	if err != nil {
 		return fmt.Errorf("open mic: %w", err)
 	}
