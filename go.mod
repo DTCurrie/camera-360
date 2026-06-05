@@ -5,6 +5,7 @@ go 1.25.9
 require (
 	go.viam.com/rdk v0.129.2
 	go.viam.com/utils v0.6.1
+	golang.org/x/sys v0.42.0
 )
 
 require (
@@ -192,7 +193,6 @@ require (
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	golang.org/x/time v0.10.0 // indirect
 	golang.org/x/tools v0.40.0 // indirect

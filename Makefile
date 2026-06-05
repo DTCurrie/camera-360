@@ -1,4 +1,4 @@
-.PHONY: lint update test module all playground setup
+.PHONY: lint update test module all playground playground-live setup
 
 GO_BUILD_ENV :=
 GO_BUILD_FLAGS :=
@@ -15,7 +15,7 @@ $(MODULE_BINARY): Makefile go.mod *.go cmd/module/*.go
 
 lint:
 	gofmt -s -w .
-	cd playground && pnpm check
+	pnpm -C playground check
 
 update:
 	go get go.viam.com/rdk@latest
@@ -35,13 +35,16 @@ module: test module.tar.gz
 all: test module.tar.gz
 
 playground/node_modules: 
-	cd playground && pnpm install
+	pnpm -C playground install
 
 playground: $(MODULE_BINARY) playground/node_modules
 	viam-server -config playground/viam-config.json & \
 	server_pid=$$!; \
 	trap "kill $$server_pid 2>/dev/null" EXIT INT TERM; \
-	cd playground && pnpm dev
+	pnpm -C playground dev
+
+playground-live: playground/node_modules
+	pnpm -C playground dev:live
 
 setup:
 	go mod tidy

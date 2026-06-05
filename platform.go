@@ -42,16 +42,16 @@ const (
 // per process, no matter how many times the camera is (re)built.
 var darwinCapLogOnce sync.Once
 
-// defaultVideoDevice returns the conventional video device for the host OS.
-func defaultVideoDevice() string {
+// DefaultVideoDevice returns the conventional video device for the host OS.
+func DefaultVideoDevice() string {
 	if runtime.GOOS == "darwin" {
 		return defaultDarwinVideoDevice
 	}
 	return defaultLinuxVideoDevice
 }
 
-// defaultVideoSize returns the default capture width and height for the host OS.
-func defaultVideoSize() (int, int) {
+// DefaultVideoSize returns the default capture width and height for the host OS.
+func DefaultVideoSize() (int, int) {
 	if runtime.GOOS == "darwin" {
 		return maxDarwinVideoWidth, maxDarwinVideoHeight
 	}
@@ -63,7 +63,7 @@ func defaultVideoSize() (int, int) {
 // defaultVideoSize), so a larger requested size is clamped to 1280x720 and a
 // one-time notice is logged so it's obvious why the request wasn't honored. On
 // other OSes the size is returned unchanged.
-func clampVideoSize(width, height int, logger logging.Logger) (int, int) {
+func ClampVideoSize(width, height int, logger logging.Logger) (int, int) {
 	if runtime.GOOS != "darwin" {
 		return width, height
 	}
@@ -80,8 +80,8 @@ func clampVideoSize(width, height int, logger logging.Logger) (int, int) {
 	return maxDarwinVideoWidth, maxDarwinVideoHeight
 }
 
-// defaultAudioDevice returns the conventional audio capture device for the host OS.
-func defaultAudioDevice() string {
+// DefaultAudioDevice returns the conventional audio capture device for the host OS.
+func DefaultAudioDevice() string {
 	if runtime.GOOS == "darwin" {
 		return defaultDarwinAudioDevice
 	}
@@ -92,7 +92,7 @@ func defaultAudioDevice() string {
 // UVC camera at the given device, frame size and rate. inputFormat is the V4L2
 // pixel format requested from the device (e.g. "mjpeg"); it is
 // ignored on macOS, where avfoundation negotiates format itself.
-func videoInputArgs(device string, width, height, frameRate int, inputFormat string) []string {
+func VideoInputArgs(device string, width, height, frameRate int, inputFormat string) []string {
 	size := fmt.Sprintf("%dx%d", width, height)
 	fps := strconv.Itoa(frameRate)
 	switch runtime.GOOS {
@@ -118,7 +118,7 @@ func videoInputArgs(device string, width, height, frameRate int, inputFormat str
 
 // audioInputArgs builds the ffmpeg input flags (up to and including "-i") for a
 // UAC microphone at the given device.
-func audioInputArgs(device string) []string {
+func AudioInputArgs(device string) []string {
 	switch runtime.GOOS {
 	case "darwin":
 		return []string{"-f", "avfoundation", "-i", device}

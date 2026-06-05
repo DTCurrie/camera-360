@@ -52,3 +52,22 @@ This needs the projector made coverage/FOV-aware for a partial-height panorama
 (the 360 mode is ~360°×53°, not a full sphere) — see the lens-architecture notes.
 This is likely the highest-value direction and is independent of the Linux XU
 work.
+
+## GPano tagging assumes the device is in 360 All-Around
+
+**Status: accepted / depends on mode detection.** The
+[jvcu360-camera](jvcu360/jvcu360.go) tags every frame with **GPano** cropped-area
+XMP (a partial equatorial band, computed from the frame dimensions and the
+configured `h_fov_deg`/`v_fov_deg`), so the test-widget's 3D viewer frames the
+~360°×53° band correctly instead of stretching it pole-to-pole. This is right for
+the JVCU360's **360 All-Around** mode, which the model assumes — but the device
+also has flat/dewarped modes (Host, Single View, Wide Angle — see
+[jvcu360/README.md](jvcu360/README.md)) whose frames aren't an equirectangular
+band; in those, the GPano framing is wrong.
+
+The device can't report its mode over USB (the mode XU is a write-mostly command
+pipe — see the deep-probe notes), so the model can't auto-detect this; the user
+must set the touch bar to 360 All-Around. A future fix is to make the tag track
+the active mode once a `jvcu360-mode` switch can drive/publish it — deferred until
+that control exists (it needs the Windows companion app's `SET_CUR` traffic
+sniffed; brute-forcing the 64-byte command space on Linux isn't tractable).

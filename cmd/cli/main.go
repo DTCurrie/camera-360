@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"camera360"
+	akaso360 "camera360/akaso_360"
 	camera "go.viam.com/rdk/components/camera"
 	"go.viam.com/rdk/logging"
 )
@@ -42,13 +42,13 @@ func run(host, outDir string, yaw, pitch, fov float64) error {
 	defer cancel()
 	logger := logging.NewLogger("camera-360-cli")
 
-	cfg := &camera360.AmbarellaConfig{
+	cfg := &akaso360.Config{
 		Host:          host,
 		InitialYaw:    yaw,
 		InitialPitch:  pitch,
 		PinholeFOVDeg: fov,
 	}
-	cam, err := camera360.NewAmbarellaCamera(ctx, camera.Named("cli"), cfg, logger)
+	cam, err := akaso360.NewCamera(ctx, camera.Named("cli"), cfg, logger)
 	if err != nil {
 		return fmt.Errorf("open camera: %w", err)
 	}

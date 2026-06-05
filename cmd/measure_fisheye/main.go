@@ -3,7 +3,7 @@
 // More robust than centroid-of-bright-pixels because it doesn't depend on
 // where scene content happens to land.
 //
-//	go run ./cmd/measure -in out/front.jpg
+//	go run ./cmd/measure_fisheye -in out/front.jpg
 package main
 
 import (

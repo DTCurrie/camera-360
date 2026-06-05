@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	defaultAmbarellaPort = 7878
+	DefaultAmbarellaPort = 7878
 
 	msgStartSession = 257
 	msgEndSession   = 258
@@ -59,7 +59,7 @@ type Session struct {
 // is serving RTSP at rtsp://<host>:554/live.
 func DialSession(ctx context.Context, host string, port int, logger logging.Logger) (*Session, error) {
 	if port == 0 {
-		port = defaultAmbarellaPort
+		port = DefaultAmbarellaPort
 	}
 	addr := fmt.Sprintf("%s:%d", host, port)
 	d := net.Dialer{Timeout: 5 * time.Second}

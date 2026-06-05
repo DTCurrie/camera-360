@@ -2,13 +2,13 @@
 
 A [discovery service](https://docs.viam.com/operate/reference/services/discovery/)
 that detects connected USB (UVC) webcams and returns ready-to-paste configs for
-this module's [`uvc-camera`](dtcurrie_camera-360_uvc-camera.md) and
-[`uvc-mic`](dtcurrie_camera-360_uvc-mic.md) models — with the correct device
+this module's [`jvcu360-camera`](dtcurrie_camera-360_jvcu360-camera.md) and
+[`jvcu360-mic`](dtcurrie_camera-360_jvcu360-mic.md) models — with the correct device
 handles already filled in.
 
 The main thing it resolves is picking the right `video_device`. On a Raspberry
 Pi the internal ISP/codec blocks claim the low `/dev/videoN` numbers, so a USB
-webcam lands at `/dev/video8` or higher; the `uvc-camera` default of
+webcam lands at `/dev/video8` or higher; the `jvcu360-camera` default of
 `/dev/video0` then opens a non-capture node and fails (see
 [`ISSUES.md`](ISSUES.md)). Discovery reads sysfs to find the actual USB capture
 node and its paired microphone, so the emitted config just works.
@@ -55,17 +55,19 @@ All fields are optional; an empty config discovers 360/fisheye webcams with mics
 | Name              | Type   | Inclusion | Default      | Description                                                                                                |
 | ----------------- | ------ | --------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
 | `include_all_uvc` | bool   | Optional  | `false`      | Return every confirmed UVC webcam, not just those classified as 360/fisheye. Use as a fallback if a 360 camera isn't auto-detected |
-| `include_mic`     | bool   | Optional  | `true`       | Also emit a `uvc-mic` config for each device that exposes a USB microphone                                 |
+| `include_mic`     | bool   | Optional  | `true`       | Also emit a `jvcu360-mic` config for each device that exposes a USB microphone                                 |
 | `name_prefix`     | string | Optional  | (product name) | Base name for emitted configs. When empty, the device's product name is used. Duplicates get `-1`, `-2` … suffixes |
 
 ## What it returns
 
-One [`uvc-camera`](dtcurrie_camera-360_uvc-camera.md) config per discovered
+One [`jvcu360-camera`](dtcurrie_camera-360_jvcu360-camera.md) config per discovered
 webcam, and (when `include_mic` is set and the device has a USB mic) one
-[`uvc-mic`](dtcurrie_camera-360_uvc-mic.md) config named `<camera>-mic`. Each
+[`jvcu360-mic`](dtcurrie_camera-360_jvcu360-mic.md) config named `<camera>-mic`. Each
 config sets `video_device` / `audio_device` to the resolved handle; all other
-fields fall back to the model defaults. The `attributes` map also includes
-informational `usb_id`, `lens_hint`, and `device_label` keys.
+fields fall back to the model defaults. The emitted `attributes` are exactly the
+target model's own config fields — nothing else — so a returned config applies
+as-is. (The detected USB ID, lens classification, and product label are shown by
+`go run ./cmd/uvc -list`, not injected into the config.)
 
 ## DoCommand
 

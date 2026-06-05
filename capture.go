@@ -1,7 +1,7 @@
 package camera360
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,10 +17,25 @@ import (
 	"go.viam.com/rdk/logging"
 )
 
-// Capture spawns an ffmpeg subprocess to consume the camera's RTSP stream and
-// expose the latest decoded frame via Latest(). Frame decoding happens on a
-// background goroutine; readers always get the most recently produced frame
-// (no queue, no backpressure — matches the rdk ffmpeg.go pattern).
+// Capture spawns an ffmpeg subprocess to consume a camera's stream and expose
+// the latest decoded frame via Latest(). The pipeline is split into two stages
+// so decode cost can never make the live frame stale:
+//
+//   - A reader goroutine (per ffmpeg session) drains ffmpeg's stdout, splits the
+//     MJPEG byte stream into individual JPEG frames, and stores only the most
+//     recent frame's *raw bytes*. Splitting is cheap (a marker scan + a copy),
+//     so the OS pipe stays drained and the device-side v4l2/ffmpeg buffers stay
+//     shallow — i.e. the newest raw frame is genuinely current.
+//   - A single long-lived decoder goroutine wakes on each new raw frame, always
+//     grabs the *latest* stored raw frame (not a queue), and decodes it. When
+//     decode is slower than the capture rate it simply skips the frames that
+//     arrived while it was busy, so the decoded frame trails real time by at
+//     most one decode, never by an ever-growing backlog.
+//
+// This replaces an earlier design that decoded every frame in-order off the
+// pipe: on devices where pure-Go jpeg.Decode can't sustain the capture frame
+// rate (e.g. 1080p30 on ARM), that backed frames up in the pipe and Latest()
+// returned images seconds behind reality.
 type Capture struct {
 	inputArgs []string
 	label     string
@@ -32,6 +47,11 @@ type Capture struct {
 	latest        atomic.Pointer[image.Image]
 	gotFirstOnce  sync.Once
 	gotFirstFrame chan struct{}
+
+	// latestRaw holds the most recent undecoded JPEG frame; rawReady (buffered
+	// to 1, coalescing) nudges the decoder that a newer one is available.
+	latestRaw atomic.Pointer[[]byte]
+	rawReady  chan struct{}
 
 	cmdMu sync.Mutex
 	cmd   *exec.Cmd
@@ -62,8 +82,12 @@ func NewCapture(ctx context.Context, inputArgs []string, label string, logger lo
 		logger:        logger,
 		cancel:        cancel,
 		gotFirstFrame: make(chan struct{}),
+		rawReady:      make(chan struct{}, 1),
 	}
-	c.wg.Add(1)
+	// The decoder is long-lived (it spans ffmpeg restarts); the reader is
+	// (re)spawned per ffmpeg session inside runLoop.
+	c.wg.Add(2)
+	go c.decodeLoop(innerCtx)
 	go c.runLoop(innerCtx)
 	return c, nil
 }
@@ -120,7 +144,10 @@ func (c *Capture) runLoop(ctx context.Context) {
 // runOnce runs one ffmpeg session to completion and returns how many frames it
 // decoded along with the error that ended it (nil only on a clean EOF/exit).
 func (c *Capture) runOnce(ctx context.Context) (int, error) {
-	args := append([]string{"-hide_banner", "-loglevel", "warning"}, c.inputArgs...)
+	// nobuffer/low_delay keep ffmpeg from holding frames on the input side;
+	// combined with the reader draining stdout promptly, this keeps end-to-end
+	// latency to roughly one frame plus one decode.
+	args := append([]string{"-hide_banner", "-loglevel", "warning", "-fflags", "nobuffer", "-flags", "low_delay"}, c.inputArgs...)
 	args = append(args,
 		"-f", "image2pipe",
 		"-vcodec", "mjpeg",
@@ -161,77 +188,183 @@ func (c *Capture) runOnce(ctx context.Context) (int, error) {
 		}
 	}()
 
-	frames, decodeErr := c.decodeStream(stdout)
-	// If decode stopped for any reason other than ffmpeg having shut its
+	frames, readErr := c.readFrames(stdout)
+	// If the read stopped for any reason other than ffmpeg having shut its
 	// stdout (EOF), ffmpeg is still alive and will block on its next stdout
 	// write now that nobody is reading. Kill it so Wait can return and the
 	// outer loop can retry; otherwise the whole capture wedges on frame 1.
-	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) && cmd.Process != nil {
+	if readErr != nil && !errors.Is(readErr, io.EOF) && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
 	waitErr := cmd.Wait()
-	if decodeErr != nil && !errors.Is(decodeErr, io.EOF) {
-		return frames, decodeErr
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return frames, readErr
 	}
 	return frames, waitErr
 }
 
-func (c *Capture) decodeStream(r io.Reader) (int, error) {
-	// jpeg.Decode wraps a non-ByteReader argument in a fresh bufio.Reader on
-	// every call and discards whatever it had read ahead when it returns. For
-	// an MJPEG-over-image2pipe stream the lookahead always crosses into the
-	// next JPEG, so a new bufio per call loses the start of every subsequent
-	// frame and Decode #2 fails to find an SOI marker. Holding one bufio for
-	// the lifetime of the stream preserves the carry-over between frames.
-	br := bufio.NewReader(r)
+const (
+	// readChunk is how much we pull from ffmpeg's stdout per Read. A few JPEG
+	// frames' worth keeps the syscall count low without hoarding memory.
+	readChunk = 64 * 1024
+	// maxFrameBytes caps the in-progress frame buffer. A healthy MJPEG stream
+	// has frequent SOI markers; if we somehow accumulate this much without
+	// finding the next one the stream is corrupt, so we resync rather than grow
+	// without bound.
+	maxFrameBytes = 16 * 1024 * 1024
+)
+
+// readFrames drains r (ffmpeg's stdout), splits the MJPEG stream into individual
+// JPEG frames on SOI (FF D8) boundaries, and hands each completed frame to
+// storeRaw. It does no decoding, so it keeps up with the full capture rate and
+// keeps the OS pipe drained. It returns the number of frames seen and the error
+// that ended the stream. A frame is "complete" once the *next* frame's SOI is
+// seen, which is what lets us delimit frames without parsing JPEG structure.
+func (c *Capture) readFrames(r io.Reader) (int, error) {
+	acc := make([]byte, 0, readChunk*2)
+	buf := make([]byte, readChunk)
 	frames := 0
 	for {
-		// Resync to the next FF D8. Even with a stable bufio across calls,
-		// jpeg.Decode can leave the reader positioned past EOI when an
-		// MJPEG-over-image2pipe encoder writes padding between frames — the
-		// next Decode then starts inside scan data and errors with
-		// "missing SOI marker". Discarding up to the next SOI is cheap and
-		// keeps us aligned regardless of what ffmpeg emits.
-		if err := scanToSOI(br); err != nil {
-			return frames, err
+		n, rerr := r.Read(buf)
+		if n > 0 {
+			acc = append(acc, buf[:n]...)
+			for {
+				start := indexSOI(acc, 0)
+				if start < 0 {
+					// No frame start yet; drop junk but keep a trailing 0xFF
+					// that might be the first half of an SOI split across reads.
+					acc = keepTrailingByte(acc)
+					break
+				}
+				next := indexSOI(acc, start+2)
+				if next < 0 {
+					// Incomplete trailing frame; keep it (from its SOI) to
+					// finish on the next read, unless it's grown implausibly
+					// large, in which case resync.
+					if start > 0 {
+						acc = append(acc[:0], acc[start:]...)
+					}
+					if len(acc) > maxFrameBytes {
+						acc = acc[:0]
+					}
+					break
+				}
+				c.storeRaw(acc[start:next])
+				frames++
+				acc = append(acc[:0], acc[next:]...)
+			}
 		}
-		img, err := jpeg.Decode(br)
+		if rerr != nil {
+			// The stream ended. A complete trailing frame has no following SOI
+			// to delimit it, so flush it best-effort: a clean EOF leaves a whole
+			// final JPEG, and a mid-write kill leaves a truncated one the decoder
+			// will simply reject. Either way we don't silently drop the last
+			// frame of a session.
+			if start := indexSOI(acc, 0); start >= 0 {
+				c.storeRaw(acc[start:])
+				frames++
+			}
+			return frames, rerr
+		}
+	}
+}
+
+// storeRaw copies one JPEG frame out of the read accumulator (which gets
+// overwritten) and publishes it as the latest raw frame, nudging the decoder.
+func (c *Capture) storeRaw(frame []byte) {
+	f := make([]byte, len(frame))
+	copy(f, frame)
+	c.latestRaw.Store(&f)
+	// Coalescing notify: if a signal is already pending the decoder will pick
+	// up whatever the latest frame is when it wakes, so dropping this one is
+	// exactly the stale-frame skipping we want.
+	select {
+	case c.rawReady <- struct{}{}:
+	default:
+	}
+}
+
+// decodeLoop is the single long-lived decoder. On each wake it grabs the
+// *latest* raw frame (skipping any that piled up while it was decoding) and
+// decodes it, so the published image trails real time by at most one decode.
+func (c *Capture) decodeLoop(ctx context.Context) {
+	defer c.wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.rawReady:
+		}
+		p := c.latestRaw.Load()
+		if p == nil {
+			continue
+		}
+		img, err := jpeg.Decode(bytes.NewReader(*p))
 		if err != nil {
-			peek, _ := br.Peek(32)
+			head := *p
+			if len(head) > 32 {
+				head = head[:32]
+			}
 			c.logger.Warnw("jpeg decode failed",
-				"err", err, "frames_decoded", frames, "peek_hex", fmt.Sprintf("%x", peek))
-			return frames, err
+				"err", err, "frame_bytes", len(*p), "head_hex", fmt.Sprintf("%x", head))
+			continue
 		}
-		frames++
 		c.latest.Store(&img)
 		c.gotFirstOnce.Do(func() { close(c.gotFirstFrame) })
 	}
 }
 
-// scanToSOI advances br until the next two buffered bytes are the JPEG SOI
-// marker (FF D8), then returns with those bytes still unread so jpeg.Decode
-// will see them. We use Peek+Discard rather than ReadByte so we never have
-// to un-read more than zero bytes (bufio.Reader can only UnreadByte the
-// single most recently read byte).
-func scanToSOI(br *bufio.Reader) error {
-	for {
-		head, err := br.Peek(2)
-		if err != nil {
-			return err
-		}
-		if head[0] == 0xFF && head[1] == 0xD8 {
-			return nil
-		}
-		if _, err := br.Discard(1); err != nil {
-			return err
-		}
+// indexSOI returns the index of the next JPEG SOI marker (FF D8) in b at or
+// after from, or -1 if none (a trailing lone 0xFF counts as "not found" since
+// its companion byte hasn't arrived yet).
+func indexSOI(b []byte, from int) int {
+	if from < 0 {
+		from = 0
 	}
+	for i := from; i < len(b); {
+		j := bytes.IndexByte(b[i:], 0xFF)
+		if j < 0 {
+			return -1
+		}
+		i += j
+		if i+1 >= len(b) {
+			return -1 // 0xFF at the very end; can't confirm the 0xD8 yet
+		}
+		if b[i+1] == 0xD8 {
+			return i
+		}
+		i++
+	}
+	return -1
+}
+
+// keepTrailingByte discards b but preserves a trailing 0xFF (the possible first
+// byte of an SOI marker straddling two reads), reusing b's backing array.
+func keepTrailingByte(b []byte) []byte {
+	if len(b) > 0 && b[len(b)-1] == 0xFF {
+		b[0] = 0xFF
+		return b[:1]
+	}
+	return b[:0]
 }
 
 // Latest returns the most recently decoded frame, or an error if no frame has
 // been produced yet.
 func (c *Capture) Latest() (image.Image, error) {
 	p := c.latest.Load()
+	if p == nil {
+		return nil, errors.New("no frame available yet")
+	}
+	return *p, nil
+}
+
+// LatestRaw returns the most recently captured frame's undecoded JPEG bytes, or
+// an error if no frame has been produced yet. The slice is owned by the Capture
+// and must not be mutated (storeRaw publishes a fresh copy per frame, so the
+// returned bytes stay valid). Useful when a caller wants the device's original
+// JPEG without a decode/re-encode round-trip.
+func (c *Capture) LatestRaw() ([]byte, error) {
+	p := c.latestRaw.Load()
 	if p == nil {
 		return nil, errors.New("no frame available yet")
 	}

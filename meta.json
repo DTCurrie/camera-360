@@ -9,11 +9,11 @@
   "entrypoint": "bin/camera-360",
   "first_run": "",
   "models": [
-    { "api": "rdk:component:camera", "model": "dtcurrie:camera-360:ambarella-camera" },
-    { "api": "rdk:component:camera", "model": "dtcurrie:camera-360:uvc-camera" },
+    { "api": "rdk:component:camera", "model": "dtcurrie:camera-360:akaso-360-camera" },
+    { "api": "rdk:component:camera", "model": "dtcurrie:camera-360:jvcu360-camera" },
     {
       "api": "rdk:component:audio_in",
-      "model": "dtcurrie:camera-360:uvc-mic"
+      "model": "dtcurrie:camera-360:jvcu360-mic"
     },
     {
       "api": "rdk:service:discovery",

@@ -18,7 +18,7 @@ go mod tidy
 
 ## Working with the model files and module lifecycle
 
-Each model lives in its own file (`ambarella.go`, `uvc.go`, `uvc_mic.go`). These contain the scaffolding for the resource — configuration, initialization, and method implementations.
+Each device model lives in its own subpackage (`akaso_360/akaso.go`, `jvcu360/jvcu360.go`, `jvcu360/mic.go`), importing shared infra (capture, projection, XMP, platform helpers) from the root `camera360` package. These contain the scaffolding for the resource — configuration, initialization, and method implementations.
 
 1. **`Validate(path string)`**
    - Called first, before the module is created.
@@ -62,9 +62,9 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
    - Replace these with your logic. For example:
 
 ```go
-func (r *myResource) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
+func (r *myResource) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
     r.logger.Infof("DoCommand called with: %+v", cmd)
-    return map[string]interface{}{"status": "ok"}, nil
+    return map[string]any{"status": "ok"}, nil
 }
 ```
 
@@ -89,7 +89,7 @@ s.logger.Debugf("Current joint positions: %+v", positions)
 s.logger.Errorf("Failed to move resource: %v", err)
 
 // Example in a method
-func (s *<ModuleName><ModelName>) EndPosition(ctx context.Context, extra map[string]interface{}) (spatialmath.Pose, error) {
+func (s *<ModuleName><ModelName>) EndPosition(ctx context.Context, extra map[string]any) (spatialmath.Pose, error) {
     s.logger.Infof("EndPosition called for resource %s", s.name)
     return spatialmath.Pose{}, nil
 }

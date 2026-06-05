@@ -1,21 +1,23 @@
-// Package camera360 implements Viam components for 360 cameras. It registers
-// several models: an RTSP camera that consumes a 360 H.264 stream (unlocked
-// via an Ambarella JSON-over-TCP handshake on port 7878 where the camera
-// requires it) and stitches dual-fisheye input into an equirectangular
-// panorama with a steerable virtual pinhole view; a USB (UVC) pass-through
-// camera; a USB (UAC) microphone exposed as audio_in; and a discovery service
-// that detects connected UVC webcams and emits ready-to-use camera/mic configs.
-package camera360
+// Package akaso360 implements the dtcurrie:camera-360:akaso-360-camera model: an
+// RTSP camera that consumes a 360 H.264 stream (unlocked via an Ambarella
+// JSON-over-TCP handshake on port 7878 where the camera requires it) and stitches
+// dual-fisheye input into an equirectangular panorama with a steerable virtual
+// pinhole view. Verified on the AKASO 360; the underlying control protocol is
+// Ambarella-generic (it matches other Ambarella action cams), so the
+// camera360.Session internals keep the "ambarella" name even though the public
+// model is AKASO-specific. Shared capture/projection/XMP infra lives in the root
+// camera360 package.
+package akaso360
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"image"
-	"image/jpeg"
 	"sync"
 	"time"
+
+	"camera360"
 
 	"go.viam.com/rdk/components/camera"
 	"go.viam.com/rdk/components/camera/rtppassthrough"
@@ -26,22 +28,6 @@ import (
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
 	"go.viam.com/rdk/utils"
-)
-
-var (
-	// AmbarellaCamera is the model identifier registered with the RDK.
-	AmbarellaCamera = resource.NewModel("dtcurrie", "camera-360", "ambarella-camera")
-
-	errNotSupported = errors.New("not supported by camera-360")
-)
-
-// Source name constants for the named-image views returned by Images().
-const (
-	SourceRaw             = "raw"
-	SourceFront           = "front"
-	SourceBack            = "back"
-	SourceEquirectangular = "equirectangular"
-	SourcePinhole         = "pinhole"
 )
 
 const (
@@ -55,16 +41,16 @@ const (
 )
 
 func init() {
-	resource.RegisterComponent(camera.API, AmbarellaCamera,
-		resource.Registration[camera.Camera, *AmbarellaConfig]{
-			Constructor: newAmbarellaCamera,
+	resource.RegisterComponent(camera.API, camera360.AKASO360Camera,
+		resource.Registration[camera.Camera, *Config]{
+			Constructor: newCamera,
 		},
 	)
 }
 
-// AmbarellaConfig is the user-supplied JSON config. Defaults are documented in the
+// Config is the user-supplied JSON config. Defaults are documented in the
 // component's markdown page; all fields are optional.
-type AmbarellaConfig struct {
+type Config struct {
 	// Host is the camera's IP on its Wi-Fi hotspot. Almost always
 	// 192.168.42.1 — the field exists for the rare firmware that uses a
 	// different gateway (e.g. 192.168.169.1 on some variants).
@@ -74,8 +60,8 @@ type AmbarellaConfig struct {
 	// are in HALF-FRAME-LOCAL coordinates: the front lens config measures
 	// from the right half (so 480,480 is the centre of the right half of a
 	// 1920×960 frame); the back lens config measures from the left half.
-	FrontLens *FisheyeLens `json:"front_lens,omitempty"`
-	BackLens  *FisheyeLens `json:"back_lens,omitempty"`
+	FrontLens *camera360.FisheyeLens `json:"front_lens,omitempty"`
+	BackLens  *camera360.FisheyeLens `json:"back_lens,omitempty"`
 
 	// ERPWidth/Height controls the stitched panorama's resolution.
 	ERPWidth  int `json:"erp_width,omitempty"`
@@ -113,7 +99,7 @@ type AmbarellaConfig struct {
 // Validate accepts any combination of fields; we apply defaults at
 // construction. We return no dependencies — this camera doesn't reference
 // other Viam resources.
-func (cfg *AmbarellaConfig) Validate(path string) ([]string, []string, error) {
+func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.PinholeWidth < 0 || cfg.PinholeHeight < 0 {
 		return nil, nil, fmt.Errorf("%s: pinhole_width/height must be non-negative", path)
 	}
@@ -123,34 +109,34 @@ func (cfg *AmbarellaConfig) Validate(path string) ([]string, []string, error) {
 	return nil, nil, nil
 }
 
-type ambarellaCamera struct {
+type akasoCamera struct {
 	resource.AlwaysRebuild
 
 	name   resource.Name
 	logger logging.Logger
-	cfg    *AmbarellaConfig
+	cfg    *Config
 
-	session   *Session
-	capture   *Capture
-	stitcher  *FisheyeStitcher
-	projector *PinholeProjector
+	session   *camera360.Session
+	capture   *camera360.Capture
+	stitcher  *camera360.FisheyeStitcher
+	projector *camera360.PinholeProjector
 
 	cancelCtx  context.Context
 	cancelFunc context.CancelFunc
 	wg         sync.WaitGroup
 }
 
-func newAmbarellaCamera(ctx context.Context, _ resource.Dependencies, rawConf resource.Config, logger logging.Logger) (camera.Camera, error) {
-	conf, err := resource.NativeConfig[*AmbarellaConfig](rawConf)
+func newCamera(ctx context.Context, _ resource.Dependencies, rawConf resource.Config, logger logging.Logger) (camera.Camera, error) {
+	conf, err := resource.NativeConfig[*Config](rawConf)
 	if err != nil {
 		return nil, err
 	}
-	return NewAmbarellaCamera(ctx, rawConf.ResourceName(), conf, logger)
+	return NewCamera(ctx, rawConf.ResourceName(), conf, logger)
 }
 
-// NewAmbarellaCamera is exposed for the CLI smoke test in cmd/cli/main.go; the regular
-// module path goes through newAmbarellaCamera.
-func NewAmbarellaCamera(ctx context.Context, name resource.Name, conf *AmbarellaConfig, logger logging.Logger) (camera.Camera, error) {
+// NewCamera is exposed for the CLI smoke test in cmd/cli/main.go; the regular
+// module path goes through newCamera.
+func NewCamera(ctx context.Context, name resource.Name, conf *Config, logger logging.Logger) (camera.Camera, error) {
 	host := conf.Host
 	if host == "" {
 		host = defaultHost
@@ -175,7 +161,7 @@ func NewAmbarellaCamera(ctx context.Context, name resource.Name, conf *Ambarella
 	if erpH == 0 {
 		erpH = defaultERPHeight
 	}
-	defFront, defBack := DefaultLenses()
+	defFront, defBack := camera360.DefaultLenses()
 	front := defFront
 	if conf.FrontLens != nil {
 		front = *conf.FrontLens
@@ -186,13 +172,13 @@ func NewAmbarellaCamera(ctx context.Context, name resource.Name, conf *Ambarella
 	}
 
 	logger.Infow("opening 360 camera over RTSP", "host", host)
-	session, err := DialSession(ctx, host, defaultAmbarellaPort, logger)
+	session, err := camera360.DialSession(ctx, host, camera360.DefaultAmbarellaPort, logger)
 	if err != nil {
 		return nil, fmt.Errorf("ambarella session: %w", err)
 	}
 	logger.Infow("ambarella session established; opening rtsp", "url", session.RTSPURL())
 
-	capture, err := NewCaptureFromRTSP(ctx, session.RTSPURL(), logger)
+	capture, err := camera360.NewCaptureFromRTSP(ctx, session.RTSPURL(), logger)
 	if err != nil {
 		_ = session.Close()
 		return nil, fmt.Errorf("rtsp capture: %w", err)
@@ -203,11 +189,11 @@ func NewAmbarellaCamera(ctx context.Context, name resource.Name, conf *Ambarella
 	// firmware ships a different size, the stitcher's Apply path will
 	// produce a garbled result and we'd need to rebuild — handle that when
 	// it happens rather than over-engineering now.
-	lensModel := LensEquisolid
+	lensModel := camera360.LensEquisolid
 	if conf.LensModel == "equidistant" {
-		lensModel = LensEquidistant
+		lensModel = camera360.LensEquidistant
 	}
-	stitcher := BuildFisheyeStitcherOpts(front, back, 1920, 960, erpW, erpH, StitcherOpts{
+	stitcher := camera360.BuildFisheyeStitcherOpts(front, back, 1920, 960, erpW, erpH, camera360.StitcherOpts{
 		SeamFeatherDeg:        conf.SeamFeatherDeg,
 		BackExtrinsicYawDeg:   conf.BackExtrinsicYawDeg,
 		BackExtrinsicPitchDeg: conf.BackExtrinsicPitchDeg,
@@ -215,17 +201,17 @@ func NewAmbarellaCamera(ctx context.Context, name resource.Name, conf *Ambarella
 		LensModel:             lensModel,
 	})
 
-	view := PinholeView{
+	view := camera360.PinholeView{
 		Yaw:    conf.InitialYaw,
 		Pitch:  conf.InitialPitch,
 		FOVDeg: pfov,
 		Width:  pw,
 		Height: ph,
 	}
-	projector := NewPinholeProjector(view, erpW, erpH)
+	projector := camera360.NewPinholeProjector(view, erpW, erpH)
 
 	cctx, cancel := context.WithCancel(context.Background())
-	c := &ambarellaCamera{
+	c := &akasoCamera{
 		name:       name,
 		logger:     logger,
 		cfg:        conf,
@@ -246,7 +232,7 @@ func NewAmbarellaCamera(ctx context.Context, name resource.Name, conf *Ambarella
 // preview if the control socket goes idle (the symptom is RTSP suddenly
 // 404'ing); a get_settings every few seconds is cheap and keeps the session
 // warm.
-func (c *ambarellaCamera) heartbeatLoop() {
+func (c *akasoCamera) heartbeatLoop() {
 	defer c.wg.Done()
 	t := time.NewTicker(heartbeatInterval)
 	defer t.Stop()
@@ -262,9 +248,9 @@ func (c *ambarellaCamera) heartbeatLoop() {
 	}
 }
 
-func (c *ambarellaCamera) Name() resource.Name { return c.name }
+func (c *akasoCamera) Name() resource.Name { return c.name }
 
-func (c *ambarellaCamera) Images(ctx context.Context, filterSourceNames []string, _ map[string]interface{}) ([]camera.NamedImage, resource.ResponseMetadata, error) {
+func (c *akasoCamera) Images(ctx context.Context, filterSourceNames []string, _ map[string]any) ([]camera.NamedImage, resource.ResponseMetadata, error) {
 	// Block briefly for the first frame on a cold start. After that, Latest()
 	// always returns immediately with the most recent frame.
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -292,7 +278,7 @@ func (c *ambarellaCamera) Images(ctx context.Context, filterSourceNames []string
 	// Stitching is the expensive step (~erpW*erpH samples); only run it if
 	// some downstream consumer actually needs ERP or pinhole output.
 	var erp *image.RGBA
-	needERP := want(SourceEquirectangular) || want(SourcePinhole)
+	needERP := want(camera360.SourceEquirectangular) || want(camera360.SourcePinhole)
 	if needERP {
 		erp = c.stitcher.StitchToERP(raw)
 	}
@@ -306,59 +292,50 @@ func (c *ambarellaCamera) Images(ctx context.Context, filterSourceNames []string
 		out = append(out, ni)
 		return nil
 	}
-	if want(SourceEquirectangular) {
-		xmp := `
-		<x:xmpmeta xmlns:x="adobe:ns:meta/">
-		<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-		<rdf:Description xmlns:viam="https://www.viam.com/ns/1.0/">
-		<viam:is360>true</viam:is360>
-		</rdf:Description>
-		</rdf:RDF>
-		</x:xmpmeta>
-		`
-		imagebytes, err := encodeJPEG(erp)
+	if want(camera360.SourceEquirectangular) {
+		imagebytes, err := camera360.EncodeJPEG(erp)
 		if err != nil {
 			return nil, resource.ResponseMetadata{}, fmt.Errorf("failed to encode equirectangular jpeg: %w", err)
 		}
-		imagebytes, err = addXMPToJPEG(imagebytes, xmp)
+		imagebytes, err = camera360.JPEGWithEquirectangularXMP(imagebytes)
 		if err != nil {
 			return nil, resource.ResponseMetadata{}, err
 		}
-		namedImg, err := camera.NamedImageFromBytes(imagebytes, SourceEquirectangular, utils.MimeTypeJPEG, data.Annotations{})
+		namedImg, err := camera.NamedImageFromBytes(imagebytes, camera360.SourceEquirectangular, utils.MimeTypeJPEG, data.Annotations{})
 		if err != nil {
 			return nil, resource.ResponseMetadata{}, fmt.Errorf("failed to create named image: %w", err)
 		}
 		out = append(out, namedImg)
 	}
-	if want(SourceRaw) {
-		if err := add(raw, SourceRaw); err != nil {
+	if want(camera360.SourceRaw) {
+		if err := add(raw, camera360.SourceRaw); err != nil {
 			return nil, resource.ResponseMetadata{}, err
 		}
 	}
-	if want(SourceFront) {
-		if err := add(c.stitcher.HalfFrame(raw, "front"), SourceFront); err != nil {
+	if want(camera360.SourceFront) {
+		if err := add(c.stitcher.HalfFrame(raw, "front"), camera360.SourceFront); err != nil {
 			return nil, resource.ResponseMetadata{}, err
 		}
 	}
-	if want(SourceBack) {
-		if err := add(c.stitcher.HalfFrame(raw, "back"), SourceBack); err != nil {
+	if want(camera360.SourceBack) {
+		if err := add(c.stitcher.HalfFrame(raw, "back"), camera360.SourceBack); err != nil {
 			return nil, resource.ResponseMetadata{}, err
 		}
 	}
-	if want(SourcePinhole) {
+	if want(camera360.SourcePinhole) {
 		flat := c.projector.Project(erp)
-		if err := add(flat, SourcePinhole); err != nil {
+		if err := add(flat, camera360.SourcePinhole); err != nil {
 			return nil, resource.ResponseMetadata{}, err
 		}
 	}
 	return out, resource.ResponseMetadata{CapturedAt: time.Now()}, nil
 }
 
-func (c *ambarellaCamera) NextPointCloud(_ context.Context, _ map[string]interface{}) (pointcloud.PointCloud, error) {
-	return nil, errNotSupported
+func (c *akasoCamera) NextPointCloud(_ context.Context, _ map[string]any) (pointcloud.PointCloud, error) {
+	return nil, camera360.ErrNotSupported
 }
 
-func (c *ambarellaCamera) Properties(_ context.Context) (camera.Properties, error) {
+func (c *akasoCamera) Properties(_ context.Context) (camera.Properties, error) {
 	return camera.Properties{
 		SupportsPCD: false,
 		ImageType:   camera.ColorStream,
@@ -367,7 +344,7 @@ func (c *ambarellaCamera) Properties(_ context.Context) (camera.Properties, erro
 	}, nil
 }
 
-func (c *ambarellaCamera) Stream(_ context.Context, _ ...gostream.ErrorHandler) (gostream.VideoStream, error) {
+func (c *akasoCamera) Stream(_ context.Context, _ ...gostream.ErrorHandler) (gostream.VideoStream, error) {
 	reader := gostream.VideoReaderFunc(func(ctx context.Context) (image.Image, func(), error) {
 		if err := c.capture.WaitFirstFrame(ctx); err != nil {
 			return nil, nil, err
@@ -381,9 +358,9 @@ func (c *ambarellaCamera) Stream(_ context.Context, _ ...gostream.ErrorHandler) 
 	return gostream.NewEmbeddedVideoStreamFromReader(reader), nil
 }
 
-func (c *ambarellaCamera) DoCommand(_ context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
+func (c *akasoCamera) DoCommand(_ context.Context, cmd map[string]any) (map[string]any, error) {
 	if v, ok := cmd["set_pinhole"]; ok {
-		params, ok := v.(map[string]interface{})
+		params, ok := v.(map[string]any)
 		if !ok {
 			return nil, errors.New("set_pinhole: expected object")
 		}
@@ -401,14 +378,14 @@ func (c *ambarellaCamera) DoCommand(_ context.Context, cmd map[string]interface{
 			fov = f
 		}
 		c.projector.SetView(yaw, pitch, fov)
-		return map[string]interface{}{"yaw_deg": yaw, "pitch_deg": pitch, "fov_deg": fov}, nil
+		return map[string]any{"yaw_deg": yaw, "pitch_deg": pitch, "fov_deg": fov}, nil
 	}
 	if _, ok := cmd["get_pinhole"]; ok {
 		yaw, pitch, fov := c.projector.View()
-		return map[string]interface{}{"yaw_deg": yaw, "pitch_deg": pitch, "fov_deg": fov}, nil
+		return map[string]any{"yaw_deg": yaw, "pitch_deg": pitch, "fov_deg": fov}, nil
 	}
 	if v, ok := cmd["set_stitch"]; ok {
-		params, ok := v.(map[string]interface{})
+		params, ok := v.(map[string]any)
 		if !ok {
 			return nil, errors.New("set_stitch: expected object")
 		}
@@ -429,7 +406,7 @@ func (c *ambarellaCamera) DoCommand(_ context.Context, cmd map[string]interface{
 // StitchParams. Only specified fields change; unspecified fields are left
 // alone. Returns an error if a value has an unexpected type or out-of-range
 // value.
-func applyStitchUpdate(p *StitchParams, params map[string]interface{}) error {
+func applyStitchUpdate(p *camera360.StitchParams, params map[string]any) error {
 	getF := func(key string, dst *float64) error {
 		v, ok := params[key]
 		if !ok {
@@ -459,9 +436,9 @@ func applyStitchUpdate(p *StitchParams, params map[string]interface{}) error {
 		}
 		switch s {
 		case "equisolid":
-			p.Opts.LensModel = LensEquisolid
+			p.Opts.LensModel = camera360.LensEquisolid
 		case "equidistant":
-			p.Opts.LensModel = LensEquidistant
+			p.Opts.LensModel = camera360.LensEquidistant
 		default:
 			return fmt.Errorf("lens_model: must be \"equisolid\" or \"equidistant\", got %q", s)
 		}
@@ -479,8 +456,8 @@ func applyStitchUpdate(p *StitchParams, params map[string]interface{}) error {
 	return nil
 }
 
-func applyLensUpdate(lens *FisheyeLens, v interface{}) error {
-	m, ok := v.(map[string]interface{})
+func applyLensUpdate(lens *camera360.FisheyeLens, v interface{}) error {
+	m, ok := v.(map[string]any)
 	if !ok {
 		return fmt.Errorf("expected object, got %T", v)
 	}
@@ -510,25 +487,25 @@ func applyLensUpdate(lens *FisheyeLens, v interface{}) error {
 	return nil
 }
 
-func stitchParamsToMap(p StitchParams) map[string]interface{} {
+func stitchParamsToMap(p camera360.StitchParams) map[string]any {
 	lensModel := "equisolid"
-	if p.Opts.LensModel == LensEquidistant {
+	if p.Opts.LensModel == camera360.LensEquidistant {
 		lensModel = "equidistant"
 	}
-	return map[string]interface{}{
+	return map[string]any{
 		"seam_feather_deg":         p.Opts.SeamFeatherDeg,
 		"back_extrinsic_yaw_deg":   p.Opts.BackExtrinsicYawDeg,
 		"back_extrinsic_pitch_deg": p.Opts.BackExtrinsicPitchDeg,
 		"back_extrinsic_roll_deg":  p.Opts.BackExtrinsicRollDeg,
 		"lens_model":               lensModel,
-		"front_lens": map[string]interface{}{
+		"front_lens": map[string]any{
 			"center_x":     p.Front.CenterX,
 			"center_y":     p.Front.CenterY,
 			"radius":       p.Front.Radius,
 			"fov_deg":      p.Front.FOVDeg,
 			"rotation_deg": p.Front.RotationDeg,
 		},
-		"back_lens": map[string]interface{}{
+		"back_lens": map[string]any{
 			"center_x":     p.Back.CenterX,
 			"center_y":     p.Back.CenterY,
 			"radius":       p.Back.Radius,
@@ -538,13 +515,13 @@ func stitchParamsToMap(p StitchParams) map[string]interface{} {
 	}
 }
 
-func (c *ambarellaCamera) Geometries(_ context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
+func (c *akasoCamera) Geometries(_ context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
 	return []spatialmath.Geometry{}, nil
 }
 
-func (c *ambarellaCamera) Status(_ context.Context) (map[string]interface{}, error) {
+func (c *akasoCamera) Status(_ context.Context) (map[string]any, error) {
 	yaw, pitch, fov := c.projector.View()
-	return map[string]interface{}{
+	return map[string]any{
 		"rtsp_url":  c.session.RTSPURL(),
 		"yaw_deg":   yaw,
 		"pitch_deg": pitch,
@@ -552,15 +529,15 @@ func (c *ambarellaCamera) Status(_ context.Context) (map[string]interface{}, err
 	}, nil
 }
 
-func (c *ambarellaCamera) SubscribeRTP(_ context.Context, _ int, _ rtppassthrough.PacketCallback) (rtppassthrough.Subscription, error) {
-	return rtppassthrough.Subscription{}, errNotSupported
+func (c *akasoCamera) SubscribeRTP(_ context.Context, _ int, _ rtppassthrough.PacketCallback) (rtppassthrough.Subscription, error) {
+	return rtppassthrough.Subscription{}, camera360.ErrNotSupported
 }
 
-func (c *ambarellaCamera) Unsubscribe(_ context.Context, _ rtppassthrough.SubscriptionID) error {
-	return errNotSupported
+func (c *akasoCamera) Unsubscribe(_ context.Context, _ rtppassthrough.SubscriptionID) error {
+	return camera360.ErrNotSupported
 }
 
-func (c *ambarellaCamera) Close(_ context.Context) error {
+func (c *akasoCamera) Close(_ context.Context) error {
 	c.cancelFunc()
 	c.wg.Wait()
 	var firstErr error
@@ -571,50 +548,4 @@ func (c *ambarellaCamera) Close(_ context.Context) error {
 		firstErr = err
 	}
 	return firstErr
-}
-
-// encodeJPEG is a small helper used by the CLI smoke test (cmd/cli/main.go) to
-// dump frames to disk for manual inspection. Kept here so the helper has
-// access to the same JPEG encoder settings the module uses internally.
-func encodeJPEG(img image.Image) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func addXMPToJPEG(jpeg []byte, xmpXML string) ([]byte, error) {
-	// JPEG SOI marker
-	if len(jpeg) < 2 || jpeg[0] != 0xFF || jpeg[1] != 0xD8 {
-		return nil, fmt.Errorf("not a jpeg")
-	}
-
-	// XMP APP1 marker format
-	xmpHeader := []byte("http://ns.adobe.com/xap/1.0/\x00")
-
-	payload := append(xmpHeader, []byte(xmpXML)...)
-
-	segmentLength := len(payload) + 2
-
-	app1 := []byte{
-		0xFF, 0xE1,
-		byte(segmentLength >> 8),
-		byte(segmentLength & 0xFF),
-	}
-
-	app1 = append(app1, payload...)
-
-	var out bytes.Buffer
-
-	// Write SOI
-	out.Write(jpeg[:2])
-
-	// Insert APP1 segment immediately after SOI
-	out.Write(app1)
-
-	// Rest of JPEG
-	out.Write(jpeg[2:])
-
-	return out.Bytes(), nil
 }

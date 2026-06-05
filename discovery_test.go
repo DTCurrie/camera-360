@@ -43,25 +43,24 @@ func TestDiscoverResourcesDefault360Only(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("want 3 configs, got %d: %+v", len(got), got)
 	}
-	if got[0].Name != "jvcu360" || got[0].API != camera.API || got[0].Model != UVCCamera {
-		t.Errorf("config 0 = %q %v %v, want jvcu360 camera UVCCamera", got[0].Name, got[0].API, got[0].Model)
+	if got[0].Name != "jvcu360" || got[0].API != camera.API || got[0].Model != JVCU360Camera {
+		t.Errorf("config 0 = %q %v %v, want jvcu360 camera JVCU360Camera", got[0].Name, got[0].API, got[0].Model)
 	}
-	if got[1].Name != "jvcu360-mic" || got[1].API != audioin.API || got[1].Model != UVCMic {
-		t.Errorf("config 1 = %q %v %v, want jvcu360-mic audio_in UVCMic", got[1].Name, got[1].API, got[1].Model)
+	if got[1].Name != "jvcu360-mic" || got[1].API != audioin.API || got[1].Model != JVCU360Mic {
+		t.Errorf("config 1 = %q %v %v, want jvcu360-mic audio_in JVCU360Mic", got[1].Name, got[1].API, got[1].Model)
 	}
 	if got[2].Name != "acme-fisheye-cam" || got[2].API != camera.API {
 		t.Errorf("config 2 = %q %v, want acme-fisheye-cam camera", got[2].Name, got[2].API)
 	}
-	// The camera config's typed attributes carry the discovered node.
-	cfg, ok := got[0].ConvertedAttributes.(*UVCCameraConfig)
-	if !ok {
-		t.Fatalf("config 0 ConvertedAttributes = %T, want *UVCCameraConfig", got[0].ConvertedAttributes)
+	// The Attributes map is exactly the model's config — the discovered node,
+	// and none of the device metadata that isn't a config field.
+	if got[0].Attributes["video_device"] != "/dev/video8" {
+		t.Errorf("config 0 attributes video_device = %v, want /dev/video8", got[0].Attributes["video_device"])
 	}
-	if cfg.VideoDevice != "/dev/video8" {
-		t.Errorf("config 0 video_device = %q, want /dev/video8", cfg.VideoDevice)
-	}
-	if got[0].Attributes["lens_hint"] != "known-360" || got[0].Attributes["usb_id"] != "0711:0360" {
-		t.Errorf("config 0 attributes missing lens_hint/usb_id: %+v", got[0].Attributes)
+	for _, k := range []string{"usb_id", "lens_hint", "device_label"} {
+		if _, ok := got[0].Attributes[k]; ok {
+			t.Errorf("config 0 attributes should not carry non-config key %q: %+v", k, got[0].Attributes)
+		}
 	}
 }
 
@@ -102,16 +101,6 @@ func TestDiscoverResourcesEmpty(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("want no configs, got %+v", names(got))
-	}
-}
-
-func TestToAttributeMapOmitsZeroFields(t *testing.T) {
-	m, err := toAttributeMap(&UVCCameraConfig{VideoDevice: "/dev/video8"})
-	if err != nil {
-		t.Fatalf("toAttributeMap: %v", err)
-	}
-	if len(m) != 1 || m["video_device"] != "/dev/video8" {
-		t.Errorf("want {video_device:/dev/video8}, got %+v", m)
 	}
 }
 

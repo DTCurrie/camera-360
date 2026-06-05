@@ -1,14 +1,16 @@
-package camera360
+package akaso360
 
 import (
 	"testing"
+
+	"camera360"
 )
 
 func TestApplyStitchUpdate_PartialFields(t *testing.T) {
-	front, back := DefaultLenses()
-	p := StitchParams{Front: front, Back: back, Opts: StitcherOpts{}}
+	front, back := camera360.DefaultLenses()
+	p := camera360.StitchParams{Front: front, Back: back, Opts: camera360.StitcherOpts{}}
 
-	if err := applyStitchUpdate(&p, map[string]interface{}{
+	if err := applyStitchUpdate(&p, map[string]any{
 		"seam_feather_deg":        5.0,
 		"back_extrinsic_roll_deg": -2.0,
 		"lens_model":              "equidistant",
@@ -21,7 +23,7 @@ func TestApplyStitchUpdate_PartialFields(t *testing.T) {
 	if p.Opts.BackExtrinsicRollDeg != -2 {
 		t.Errorf("back_extrinsic_roll_deg: want -2, got %v", p.Opts.BackExtrinsicRollDeg)
 	}
-	if p.Opts.LensModel != LensEquidistant {
+	if p.Opts.LensModel != camera360.LensEquidistant {
 		t.Errorf("lens_model: want LensEquidistant, got %v", p.Opts.LensModel)
 	}
 	// Untouched fields should still equal defaults.
@@ -31,11 +33,11 @@ func TestApplyStitchUpdate_PartialFields(t *testing.T) {
 }
 
 func TestApplyStitchUpdate_NestedLens(t *testing.T) {
-	front, back := DefaultLenses()
-	p := StitchParams{Front: front, Back: back, Opts: StitcherOpts{}}
+	front, back := camera360.DefaultLenses()
+	p := camera360.StitchParams{Front: front, Back: back, Opts: camera360.StitcherOpts{}}
 
-	if err := applyStitchUpdate(&p, map[string]interface{}{
-		"front_lens": map[string]interface{}{
+	if err := applyStitchUpdate(&p, map[string]any{
+		"front_lens": map[string]any{
 			"radius":  478.0,
 			"fov_deg": 195.0,
 		},
@@ -59,36 +61,36 @@ func TestApplyStitchUpdate_NestedLens(t *testing.T) {
 }
 
 func TestApplyStitchUpdate_TypeErrors(t *testing.T) {
-	front, back := DefaultLenses()
-	p := StitchParams{Front: front, Back: back}
+	front, back := camera360.DefaultLenses()
+	p := camera360.StitchParams{Front: front, Back: back}
 
-	if err := applyStitchUpdate(&p, map[string]interface{}{"seam_feather_deg": "five"}); err == nil {
+	if err := applyStitchUpdate(&p, map[string]any{"seam_feather_deg": "five"}); err == nil {
 		t.Error("expected type error for string in seam_feather_deg")
 	}
-	if err := applyStitchUpdate(&p, map[string]interface{}{"lens_model": "perspective"}); err == nil {
+	if err := applyStitchUpdate(&p, map[string]any{"lens_model": "perspective"}); err == nil {
 		t.Error("expected error for unknown lens_model value")
 	}
-	if err := applyStitchUpdate(&p, map[string]interface{}{"front_lens": "not an object"}); err == nil {
+	if err := applyStitchUpdate(&p, map[string]any{"front_lens": "not an object"}); err == nil {
 		t.Error("expected error for non-object front_lens")
 	}
 }
 
 func TestStitchParamsRoundTrip(t *testing.T) {
-	front, back := DefaultLenses()
-	original := StitchParams{
+	front, back := camera360.DefaultLenses()
+	original := camera360.StitchParams{
 		Front: front,
 		Back:  back,
-		Opts: StitcherOpts{
+		Opts: camera360.StitcherOpts{
 			SeamFeatherDeg:        5,
 			BackExtrinsicRollDeg:  -2,
 			BackExtrinsicYawDeg:   1,
 			BackExtrinsicPitchDeg: -0.5,
-			LensModel:             LensEquidistant,
+			LensModel:             camera360.LensEquidistant,
 		},
 	}
 	m := stitchParamsToMap(original)
 	// Round-trip through the apply path.
-	recovered := StitchParams{Front: front, Back: back}
+	recovered := camera360.StitchParams{Front: front, Back: back}
 	if err := applyStitchUpdate(&recovered, m); err != nil {
 		t.Fatalf("apply: %v", err)
 	}

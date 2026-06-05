@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"camera360"
+	"camera360/jvcu360"
 	"go.viam.com/rdk/components/audioin"
 	camera "go.viam.com/rdk/components/camera"
 	"go.viam.com/rdk/logging"
@@ -120,8 +121,8 @@ func captureFrames(logger logging.Logger, outDir, device string, frames, width, 
 		return err
 	}
 	ctx := context.Background()
-	cfg := &camera360.UVCCameraConfig{VideoDevice: device, Width: width, Height: height, FrameRate: fps}
-	cam, err := camera360.NewUVCCamera(ctx, camera.Named("uvc-cli"), cfg, logger)
+	cfg := &jvcu360.CameraConfig{VideoDevice: device, Width: width, Height: height, FrameRate: fps}
+	cam, err := jvcu360.NewCamera(ctx, camera.Named("uvc-cli"), cfg, logger)
 	if err != nil {
 		return fmt.Errorf("open camera: %w", err)
 	}
@@ -159,7 +160,7 @@ func captureAudio(logger logging.Logger, outDir, device string, seconds float64)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mic, err := camera360.NewUVCMic(ctx, audioin.Named("uvc-cli-mic"), &camera360.UVCMicConfig{AudioDevice: device}, logger)
+	mic, err := jvcu360.NewMic(ctx, audioin.Named("uvc-cli-mic"), &jvcu360.MicConfig{AudioDevice: device}, logger)
 	if err != nil {
 		return fmt.Errorf("open mic: %w", err)
 	}

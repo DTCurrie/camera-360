@@ -1,10 +1,18 @@
-# Model `dtcurrie:camera-360:ambarella-camera`
+# Model `dtcurrie:camera-360:akaso-360-camera`
 
 A 360-camera driver that pulls a single RTSP H.264 stream, stitches
 dual-fisheye input into an equirectangular (ERP) panorama, and exposes
-a steerable virtual pinhole view derived from the ERP. Per-camera
-network setup is documented separately under each vendor subdirectory
-in the repository (e.g. [`akaso_360/`](akaso_360/) for the AKASO 360).
+a steerable virtual pinhole view derived from the ERP. The stitched ERP
+source is tagged `viam:equirectangular` (a true full 360°×180° sphere).
+Per-camera network setup is documented separately under each vendor
+subdirectory (e.g. [`akaso_360/`](akaso_360/) for the AKASO 360).
+
+> [!NOTE]
+> Verified on the **AKASO 360**, but the control path is the generic
+> **Ambarella WiFi protocol** (a JSON-over-TCP handshake on port 7878 that
+> unlocks the RTSP preview), which other Ambarella action cams share — hence
+> the internal protocol code is named `ambarella`/`Session`. A sibling Ambarella
+> 360 camera could be supported by a thin new model reusing the same internals.
 
 ## Sources
 

@@ -1,8 +1,8 @@
-// Offline tester: loads a dual-fisheye reference frame from disk, runs it
-// through the stitcher + pinhole projection, and writes outputs to disk.
+// Loads a dual-fisheye reference frame from disk, runs it through
+// the stitcher + pinhole projection, and writes outputs to disk.
 // Lets us iterate on calibration without the camera being reachable.
 //
-//	go run ./cmd/offline -in out/dual_fisheye_reference.jpg
+//	go run ./cmd/dual_fisheye -in out/dual_fisheye_reference.jpg
 package main
 
 import (

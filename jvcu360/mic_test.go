@@ -1,4 +1,4 @@
-package camera360
+package jvcu360
 
 import (
 	"bytes"
@@ -8,20 +8,22 @@ import (
 	"slices"
 	"testing"
 
+	"camera360"
+
 	"go.viam.com/rdk/components/audioin"
 	"go.viam.com/rdk/logging"
 )
 
-func TestUVCMicConfigValidate(t *testing.T) {
+func TestMicConfigValidate(t *testing.T) {
 	cases := []struct {
 		name    string
-		cfg     UVCMicConfig
+		cfg     MicConfig
 		wantErr bool
 	}{
-		{"empty defaults ok", UVCMicConfig{}, false},
-		{"explicit values ok", UVCMicConfig{AudioDevice: "plughw:1,0", SampleRateHz: 48000, NumChannels: 1}, false},
-		{"negative sample rate", UVCMicConfig{SampleRateHz: -1}, true},
-		{"negative channels", UVCMicConfig{NumChannels: -1}, true},
+		{"empty defaults ok", MicConfig{}, false},
+		{"explicit values ok", MicConfig{AudioDevice: "plughw:1,0", SampleRateHz: 48000, NumChannels: 1}, false},
+		{"negative sample rate", MicConfig{SampleRateHz: -1}, true},
+		{"negative channels", MicConfig{NumChannels: -1}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,7 +42,7 @@ func TestUVCMicConfigValidate(t *testing.T) {
 }
 
 func TestAudioInputArgs(t *testing.T) {
-	args := audioInputArgs("plughw:1,0")
+	args := camera360.AudioInputArgs("plughw:1,0")
 	if len(args) < 2 || args[len(args)-2] != "-i" || args[len(args)-1] != "plughw:1,0" {
 		t.Fatalf("expected args to end with -i plughw:1,0, got %v", args)
 	}
@@ -52,9 +54,9 @@ func TestAudioInputArgs(t *testing.T) {
 // testMic builds a mic with a tiny sample rate so chunks are small and the
 // arithmetic is easy to check: 1000Hz mono, 100ms chunks => 100 samples =>
 // 200 bytes (s16le) per chunk.
-func testMic(t *testing.T) *uvcMic {
+func testMic(t *testing.T) *jvcuMic {
 	t.Helper()
-	return &uvcMic{logger: logging.NewTestLogger(t), sampleRate: 1000, numChannels: 1}
+	return &jvcuMic{logger: logging.NewTestLogger(t), sampleRate: 1000, numChannels: 1}
 }
 
 const testBytesPerChunk = 200 // 1000Hz * 0.1s * 2 bytes * 1 channel

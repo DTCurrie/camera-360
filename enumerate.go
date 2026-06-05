@@ -49,7 +49,7 @@ var known360 = map[string]string{
 var name360Hints = []string{"360", "fisheye", "panoram", "theta", "insta360", "kandao"}
 
 // DiscoveredWebcam is one confirmed UVC webcam plus the OS handles and metadata
-// needed to build uvc-camera / uvc-mic configs.
+// needed to build jvcu360-camera / jvcu360-mic configs.
 type DiscoveredWebcam struct {
 	// VideoDevice is the V4L2 capture node, e.g. "/dev/video8".
 	VideoDevice string

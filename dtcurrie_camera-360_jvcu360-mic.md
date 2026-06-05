@@ -1,4 +1,4 @@
-# Model `dtcurrie:camera-360:uvc-mic`
+# Model `dtcurrie:camera-360:jvcu360-mic`
 
 A USB Audio Class (UAC) microphone exposed as an `audio_in` component, such as a
 webcam's built-in mic. It captures PCM by shelling out to ffmpeg — ALSA on

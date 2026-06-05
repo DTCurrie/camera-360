@@ -10,12 +10,11 @@ This module ships two models for it:
 
 | Model | API | What it does |
 | ----- | --- | ------------ |
-| [`dtcurrie:camera-360:uvc-camera`](../dtcurrie_camera-360_uvc-camera.md) | `rdk:component:camera` | UVC pass-through of the current frame as a single `raw` JPEG source |
-| [`dtcurrie:camera-360:uvc-mic`](../dtcurrie_camera-360_uvc-mic.md) | `rdk:component:audio_in` | The built-in omnidirectional mic (PCM s16, 48 kHz mono) |
+| [`dtcurrie:camera-360:jvcu360-camera`](../dtcurrie_camera-360_jvcu360-camera.md) | `rdk:component:camera` | Captures the current frame as a single `raw` JPEG source, tagged with GPano cropped-area XMP (assumes the device is in 360 All-Around) |
+| [`dtcurrie:camera-360:jvcu360-mic`](../dtcurrie_camera-360_jvcu360-mic.md) | `rdk:component:audio_in` | The built-in omnidirectional mic (PCM s16, 48 kHz mono) |
 
-These are the module's generic UVC/UAC models — this page documents how they
-behave on the JVCU360 specifically. The full config schema for each is on its
-model page (linked above).
+These are the JVCU360's device-specific models; the full config schema for each
+is on its model page (linked above).
 
 ## Prerequisites
 
@@ -33,8 +32,8 @@ model page (linked above).
 ## Configuration
 
 Full field schemas live on the model pages
-([uvc-camera](../dtcurrie_camera-360_uvc-camera.md),
-[uvc-mic](../dtcurrie_camera-360_uvc-mic.md)). The JVCU360-specific values to
+([jvcu360-camera](../dtcurrie_camera-360_jvcu360-camera.md),
+[jvcu360-mic](../dtcurrie_camera-360_jvcu360-mic.md)). The JVCU360-specific values to
 plug in:
 
 - **Camera native capture sizes:** 1920×1080, 1280×720, 640×480, 640×360, at

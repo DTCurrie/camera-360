@@ -7,7 +7,7 @@ module.
 ## Why this camera needs special setup
 
 Out of the box, the AKASO 360 is not reachable from the
-[`dtcurrie:camera-360:ambarella-camera`](../dtcurrie_camera-360_ambarella-camera.md) module
+[`dtcurrie:camera-360:akaso-360-camera`](../dtcurrie_camera-360_akaso-360-camera.md) module
 without a one-time camera-side modification. Two firmware behaviors
 cause this:
 
@@ -118,14 +118,14 @@ go run ./cmd/cli -host 10.42.0.1
 
 ### 4. Configure the Viam component
 
-In your Viam machine config, add a `dtcurrie:camera-360:ambarella-camera`
+In your Viam machine config, add a `dtcurrie:camera-360:akaso-360-camera`
 component with:
 
 ```json
 { "host": "10.42.0.1" }
 ```
 
-See [`../dtcurrie_camera-360_ambarella-camera.md`](../dtcurrie_camera-360_ambarella-camera.md)
+See [`../dtcurrie_camera-360_akaso-360-camera.md`](../dtcurrie_camera-360_akaso-360-camera.md)
 for the full config schema and DoCommand semantics.
 
 ## Files in this directory

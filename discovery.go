@@ -1,17 +1,16 @@
 package camera360
 
 // Discovery service for UVC webcams. It detects connected USB cameras (see
-// enumerate.go) and returns ready-to-paste configs for this module's uvc-camera
-// and uvc-mic models with the correct device handles already filled in — most
-// importantly the right /dev/videoN, which the user otherwise has to find by
-// hand and which defaults wrongly on a Raspberry Pi.
+// enumerate.go) and returns ready-to-paste configs for this module's
+// jvcu360-camera and jvcu360-mic models with the correct device handles already
+// filled in — most importantly the right /dev/videoN, which the user otherwise
+// has to find by hand and which defaults wrongly on a Raspberry Pi.
 //
 // Modeled on viam/find-webcams, but pure-Go (no pion/mediadevices): the heavy
 // lifting is the sysfs enumeration in enumerate.go.
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -36,7 +35,7 @@ func init() {
 
 // DiscoveryConfig is the user-supplied JSON config; all fields are optional.
 type DiscoveryConfig struct {
-	// IncludeMic emits a uvc-mic config alongside each camera that has a USB
+	// IncludeMic emits a jvcu360-mic config alongside each camera that has a USB
 	// sound card. Pointer so the default is true (an absent field means "yes").
 	IncludeMic *bool `json:"include_mic,omitempty"`
 	// IncludeAllUVC returns every confirmed UVC webcam, not just those classified
@@ -86,8 +85,8 @@ func newDiscovery(_ context.Context, _ resource.Dependencies, rawConf resource.C
 	}, nil
 }
 
-// DiscoverResources enumerates UVC webcams and returns a uvc-camera config for
-// each (plus a uvc-mic config when the device has a mic and include_mic is set).
+// DiscoverResources enumerates UVC webcams and returns a jvcu360-camera config for
+// each (plus a jvcu360-mic config when the device has a mic and include_mic is set).
 // An empty result is not an error — it just means nothing matched.
 func (d *uvcDiscovery) DiscoverResources(ctx context.Context, _ map[string]any) ([]resource.Config, error) {
 	webcams, err := d.enumerate(ctx, d.logger)
@@ -135,63 +134,33 @@ func (d *uvcDiscovery) DiscoverResources(ctx context.Context, _ map[string]any) 
 }
 
 // DoCommand is unused by this service.
-func (d *uvcDiscovery) DoCommand(_ context.Context, _ map[string]interface{}) (map[string]interface{}, error) {
-	return nil, errNotSupported
+func (d *uvcDiscovery) DoCommand(_ context.Context, _ map[string]any) (map[string]any, error) {
+	return nil, ErrNotSupported
 }
 
-// cameraConfigFor builds a uvc-camera component config for a discovered webcam.
-// It sets the typed ConvertedAttributes (only video_device; the rest fall back
-// to the camera's defaults) and an Attributes map carrying the same plus a few
-// informational keys for the app UI.
+// cameraConfigFor builds a jvcu360-camera component config for a discovered
+// webcam. Only video_device is set (the rest fall back to the model's defaults),
+// so the result is a ready-to-apply config with no fields the model can't read.
+// We emit a plain Attributes map rather than a typed ConvertedAttributes so this
+// shared package needn't import the model subpackage (which imports it back) —
+// the module decodes the attributes into the model's config at construction.
 func cameraConfigFor(name string, w DiscoveredWebcam) (resource.Config, error) {
-	typed := &UVCCameraConfig{VideoDevice: w.VideoDevice}
-	attrs, err := toAttributeMap(typed)
-	if err != nil {
-		return resource.Config{}, err
-	}
-	attrs["usb_id"] = w.USBID
-	attrs["lens_hint"] = w.LensHint
-	attrs["device_label"] = w.Label
 	return resource.Config{
-		Name:                name,
-		API:                 camera.API,
-		Model:               UVCCamera,
-		Attributes:          attrs,
-		ConvertedAttributes: typed,
+		Name:       name,
+		API:        camera.API,
+		Model:      JVCU360Camera,
+		Attributes: utils.AttributeMap{"video_device": w.VideoDevice},
 	}, nil
 }
 
-// micConfigFor builds a uvc-mic config for a discovered webcam's microphone.
+// micConfigFor builds a jvcu360-mic config for a discovered webcam's microphone.
 func micConfigFor(name string, w DiscoveredWebcam) (resource.Config, error) {
-	typed := &UVCMicConfig{AudioDevice: w.AudioDevice}
-	attrs, err := toAttributeMap(typed)
-	if err != nil {
-		return resource.Config{}, err
-	}
-	attrs["usb_id"] = w.USBID
-	attrs["device_label"] = w.Label
 	return resource.Config{
-		Name:                name,
-		API:                 audioin.API,
-		Model:               UVCMic,
-		Attributes:          attrs,
-		ConvertedAttributes: typed,
+		Name:       name,
+		API:        audioin.API,
+		Model:      JVCU360Mic,
+		Attributes: utils.AttributeMap{"audio_device": w.AudioDevice},
 	}, nil
-}
-
-// toAttributeMap round-trips a typed config struct through JSON into the
-// AttributeMap the app expects (the pattern documented in rdk's fake discovery
-// service). omitempty fields that are zero are simply absent from the map.
-func toAttributeMap(v any) (utils.AttributeMap, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, err
-	}
-	return utils.AttributeMap(m), nil
 }
 
 // sanitizeName lowercases s and keeps only [a-z0-9-], collapsing runs of other
@@ -212,11 +181,11 @@ func sanitizeName(s string) string {
 	return strings.Trim(b.String(), "-")
 }
 
-// uniqueName returns base (or "uvc-camera" if empty), suffixing -1, -2 … until
+// uniqueName returns base (or "jvcu360-camera" if empty), suffixing -1, -2 … until
 // it's unused, and records the result in taken.
 func uniqueName(base string, taken map[string]bool) string {
 	if base == "" {
-		base = "uvc-camera"
+		base = "jvcu360-camera"
 	}
 	name := base
 	for n := 1; taken[name]; n++ {

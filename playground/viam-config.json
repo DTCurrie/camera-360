@@ -13,9 +13,9 @@
   ],
   "components": [
     {
-      "name": "uvc-camera",
+      "name": "jvcu360-camera",
       "api": "rdk:component:camera",
-      "model": "dtcurrie:camera-360:uvc-camera",
+      "model": "dtcurrie:camera-360:jvcu360-camera",
       "attributes": {
         "video_device": "0",
         "width": 1280,
@@ -24,9 +24,9 @@
       }
     },
     {
-      "name": "uvc-mic",
+      "name": "jvcu360-mic",
       "api": "rdk:component:audio_in",
-      "model": "dtcurrie:camera-360:uvc-mic",
+      "model": "dtcurrie:camera-360:jvcu360-mic",
       "attributes": {
         "audio_device": ":2",
         "sample_rate_hz": 48000,

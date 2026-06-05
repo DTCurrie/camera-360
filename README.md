@@ -20,16 +20,17 @@ standard `audio_in`. See [`jvcu360/README.md`](jvcu360/README.md).
 
 ## Models
 
-- [`dtcurrie:camera-360:ambarella-camera`](dtcurrie_camera-360_ambarella-camera.md) —
+- [`dtcurrie:camera-360:akaso-360-camera`](dtcurrie_camera-360_akaso-360-camera.md) —
   Ambarella RTSP 360 camera (dual-fisheye stitch + pinhole). Configuration
   reference, source list, DoCommand schema, troubleshooting
-- [`dtcurrie:camera-360:uvc-camera`](dtcurrie_camera-360_uvc-camera.md) — USB
-  (UVC) webcam, pass-through (tested on the j5create JVCU360)
-- [`dtcurrie:camera-360:uvc-mic`](dtcurrie_camera-360_uvc-mic.md) — USB (UAC)
+- [`dtcurrie:camera-360:jvcu360-camera`](dtcurrie_camera-360_jvcu360-camera.md) —
+  j5create JVCU360 USB 360 webcam; emits its 360 All-Around band tagged with GPano
+  cropped-area metadata
+- [`dtcurrie:camera-360:jvcu360-mic`](dtcurrie_camera-360_jvcu360-mic.md) — USB (UAC)
   microphone exposed as `audio_in` (tested on the JVCU360's built-in mic)
 - [`dtcurrie:camera-360:discovery`](dtcurrie_camera-360_discovery.md) — discovery
   service that finds connected UVC webcams (Linux) and emits ready-to-paste
-  `uvc-camera` / `uvc-mic` configs with the correct device handles
+  `jvcu360-camera` / `jvcu360-mic` configs with the correct device handles
 
 ## Tested cameras
 
@@ -91,10 +92,10 @@ the prompt for you to approve and points you at the right settings.
 Rather than hand-pick a `video_device`, add the
 [`dtcurrie:camera-360:discovery`](dtcurrie_camera-360_discovery.md) service and
 let it find connected UVC webcams for you. It returns ready-to-paste
-`uvc-camera` (and `uvc-mic`) configs with the correct `/dev/videoN` and ALSA
+`jvcu360-camera` (and `jvcu360-mic`) configs with the correct `/dev/videoN` and ALSA
 handles already filled in — which is the easiest fix for the **Raspberry Pi**
 gotcha where the camera is at `/dev/video8+` (the Pi's internal ISP/codec blocks
-take the low numbers) and the `uvc-camera` default of `/dev/video0` fails.
+take the low numbers) and the `jvcu360-camera` default of `/dev/video0` fails.
 
 An empty config discovers 360/fisheye webcams with their mics:
 
@@ -144,7 +145,7 @@ Add the component to your Viam machine config and the module will:
    `equirectangular`, `pinhole`)
 
 Full configuration schema and DoCommand semantics are in
-[`dtcurrie_camera-360_ambarella-camera.md`](dtcurrie_camera-360_ambarella-camera.md).
+[`dtcurrie_camera-360_akaso-360-camera.md`](dtcurrie_camera-360_akaso-360-camera.md).
 
 ## Development
 
@@ -185,15 +186,17 @@ make playground                        # builds the module, runs viam-server + t
 
 ```
 camera-360/
-├── ambarella.go, session.go             # RTSP 360 camera driver (Ambarella)
-├── fisheye.go, pinhole.go               # stitching + projection
-├── capture.go                           # ffmpeg frame capture (UVC + RTSP)
-├── uvc.go, platform.go                  # USB (UVC) pass-through camera
-├── uvc_mic.go, audiocapture.go          # USB (UAC) audio_in microphone
+├── capture.go, audiocapture.go          # ffmpeg frame/PCM capture (UVC + RTSP)
+├── session.go                           # Ambarella JSON-over-TCP control handshake
+├── fisheye.go, pinhole.go               # dual-fisheye stitching + pinhole projection
+├── platform.go                          # per-OS ffmpeg input args, device defaults
+├── xmp.go                               # equirectangular + GPano XMP tagging
+├── models.go, sources.go                # model identifiers + shared source constants
 ├── discovery.go, enumerate.go           # UVC webcam discovery service (Linux sysfs)
-├── cmd/                                  # CLI tools (cli, offline, measure, uvc)
-├── akaso_360/                            # AKASO-specific setup + reverse-engineering
-├── jvcu360/                              # j5create JVCU360 docs + UVC probes
-├── playground/                           # SvelteKit dev app + local viam-server config
-└── dtcurrie_camera-360_ambarella-camera.md # Ambarella RTSP model documentation
+├── akaso_360/akaso.go                   # akaso-360-camera model (+ AKASO setup scripts)
+├── jvcu360/jvcu360.go, jvcu360/mic.go   # jvcu360-camera + jvcu360-mic models
+├── jvcu360/xu/                          # JVCU360 UVC Extension-Unit probe (mode control)
+├── cmd/                                  # CLI tools (module, cli, uvc, jvcu360, …)
+├── playground/                          # SvelteKit dev app + local viam-server config
+└── dtcurrie_camera-360_*.md             # per-model documentation
 ```

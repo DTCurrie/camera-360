@@ -5,8 +5,8 @@ renders Viam's [test-widgets](https://github.com/viamrobotics/test-widgets)
 (camera + audio_in) and talks to a companion `viam-server` running the module
 locally — no Viam cloud account required.
 
-By default it wires up a **USB webcam** via the generic `uvc-camera` camera +
-`uvc-mic` audio_in models. The reference device is the j5create JVCU360, which
+By default it wires up a **USB webcam** via the generic `jvcu360-camera` camera +
+`jvcu360-mic` audio_in models. The reference device is the j5create JVCU360, which
 works out of the box on a dev machine. See [`viam-config.json`](viam-config.json).
 
 ## Prerequisites
@@ -41,11 +41,39 @@ viam-server -config playground/viam-config.json    # terminal 1
 cd playground && pnpm install && pnpm dev           # terminal 2
 ```
 
+## Run it against a live machine
+
+To point the same widgets at a real Viam machine running this module on the
+target device (e.g. the Linux box with the camera attached) instead of a local
+`viam-server`:
+
+```bash
+cp playground/.env.example playground/.env.live.local   # then fill it in
+make playground-live
+```
+
+`.env.live.local` is gitignored. Fill it from the machine's **CONNECT** tab in
+the Viam app:
+
+- `VITE_VIAM_HOST` — the machine main part address (`….viam.cloud`)
+- `VITE_VIAM_PART_ID` — the machine part ID
+- `VITE_VIAM_API_KEY_ID` / `VITE_VIAM_API_KEY` — an API key for the machine
+- `VITE_VIAM_SIGNALING_ADDRESS` — optional; defaults to `https://app.viam.com:443`
+
+`make playground-live` runs only the SvelteKit app (`pnpm dev:live`, i.e.
+`vite dev --mode live`) — it does **not** build the module or start a local
+server, since the module runs on the remote device. When `VITE_VIAM_HOST` and
+`VITE_VIAM_PART_ID` are set the app builds a cloud `DialConf` authenticated with
+the API key; otherwise it falls back to the local dial (see
+[`src/lib/viam.ts`](src/lib/viam.ts)).
+
 The page lists each configured resource with its test widget:
 
-- **`uvc-camera` (camera)** — `CameraWidget`: live/polling video, source select,
-  360° view, screenshot.
-- **`uvc-mic` (audio_in)** — `AudioInputWidget`: codec select (`pcm16`),
+- **`jvcu360-camera` (camera)** — `CameraWidget`: live/polling video, source select,
+  360° view, screenshot. The interactive 3D/360 viewer reads the `viam:equirectangular` XMP
+  tag the module always adds; it shows up when the card is set to a **polling**
+  refresh interval (the tag rides on `GetImage`, not the live WebRTC stream).
+- **`jvcu360-mic` (audio_in)** — `AudioInputWidget`: codec select (`pcm16`),
   record, download.
 
 ## How the connection works
